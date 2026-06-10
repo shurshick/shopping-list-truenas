@@ -1,7 +1,6 @@
+import logging
 from html import escape
-from urllib.parse import quote
-
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +11,7 @@ from .security import hash_password, verify_password
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_server_settings(db: Session) -> ServerSetting:
@@ -19,8 +19,7 @@ def get_server_settings(db: Session) -> ServerSetting:
     if server_settings is None:
         server_settings = ServerSetting(id=1)
         db.add(server_settings)
-        db.commit()
-        db.refresh(server_settings)
+        db.flush()
     return server_settings
 
 
@@ -28,10 +27,10 @@ def has_admin_user(db: Session) -> bool:
     return db.scalar(select(User.id).where(User.is_admin.is_(True)).limit(1)) is not None
 
 
-def verify_admin(db: Session, email: str, password: str) -> User:
+def verify_admin(db: Session, email: str, password: str) -> User | None:
     user = db.scalar(select(User).where(User.email == email.lower(), User.is_admin.is_(True)))
     if user is None or not verify_password(password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Неверный email или пароль администратора")
+        return None
     return user
 
 
@@ -140,10 +139,11 @@ def render_setup_page(server_settings: ServerSetting, needs_admin_creation: bool
 @router.get("/setup", response_class=HTMLResponse)
 def setup_page(message: str = "", db: Session = Depends(get_db)):
     server_settings = get_server_settings(db)
+    display_message = "Настройки сохранены" if message == "saved" else message
     return render_setup_page(
         server_settings,
         needs_admin_creation=not has_admin_user(db),
-        message=message,
+        message=display_message,
     )
 
 
@@ -159,28 +159,59 @@ def save_setup(
 ):
     needs_admin_creation = not has_admin_user(db)
     email = admin_email.strip().lower()
+    server_settings = get_server_settings(db)
 
     if len(admin_password) < 8:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пароль администратора слишком короткий")
+        return HTMLResponse(
+            render_setup_page(server_settings, needs_admin_creation, "Пароль администратора слишком короткий"),
+            status_code=400,
+        )
 
     if needs_admin_creation:
         if admin_password != admin_password_confirm:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пароли администратора не совпадают")
+            return HTMLResponse(
+                render_setup_page(server_settings, needs_admin_creation, "Пароли администратора не совпадают"),
+                status_code=400,
+            )
         if db.scalar(select(User.id).where(User.email == email)):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Этот email уже зарегистрирован")
-        db.add(User(email=email, password_hash=hash_password(admin_password), is_admin=True))
-    else:
-        verify_admin(db, email, admin_password)
+            return HTMLResponse(
+                render_setup_page(server_settings, needs_admin_creation, "Этот email уже зарегистрирован"),
+                status_code=409,
+            )
+        try:
+            password_hash = hash_password(admin_password)
+        except Exception:
+            logger.exception("Could not hash administrator password")
+            return HTMLResponse(
+                render_setup_page(server_settings, needs_admin_creation, "Не удалось подготовить пароль администратора"),
+                status_code=500,
+            )
+        db.add(User(email=email, password_hash=password_hash, is_admin=True))
+    elif verify_admin(db, email, admin_password) is None:
+        return HTMLResponse(
+            render_setup_page(server_settings, needs_admin_creation, "Неверный email или пароль администратора"),
+            status_code=403,
+        )
 
     normalized_url = external_url.strip().rstrip("/")
     if not normalized_url.startswith("https://"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Внешний адрес должен начинаться с https://")
+        return HTMLResponse(
+            render_setup_page(server_settings, needs_admin_creation, "Внешний адрес должен начинаться с https://"),
+            status_code=400,
+        )
 
-    server_settings = get_server_settings(db)
     server_settings.app_name = app_name.strip()
     server_settings.external_url = normalized_url
     server_settings.allow_registration = allow_registration
     server_settings.setup_completed = True
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Could not save server setup")
+        return HTMLResponse(
+            render_setup_page(server_settings, needs_admin_creation, "Не удалось сохранить настройки. Проверьте логи контейнера API."),
+            status_code=500,
+        )
 
-    return RedirectResponse(url=f"/setup?message={quote('Настройки сохранены')}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/setup?message=saved", status_code=303)
