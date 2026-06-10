@@ -22,6 +22,7 @@ data class ShoppingUiState(
     val email: String = "",
     val password: String = "",
     val lists: List<ShoppingListDto> = emptyList(),
+    val productCatalog: List<String> = emptyList(),
     val selectedListId: Int? = null,
     val message: String? = null,
     val isLoading: Boolean = false
@@ -29,10 +30,34 @@ data class ShoppingUiState(
 
 class ShoppingViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("shopping-list", Context.MODE_PRIVATE)
+    private val defaultProducts = listOf(
+        "Хлеб",
+        "Молоко",
+        "Сыр",
+        "Яйца",
+        "Масло",
+        "Курица",
+        "Говядина",
+        "Рыба",
+        "Картофель",
+        "Морковь",
+        "Лук",
+        "Помидоры",
+        "Огурцы",
+        "Яблоки",
+        "Бананы",
+        "Рис",
+        "Макароны",
+        "Сахар",
+        "Соль",
+        "Чай",
+        "Кофе"
+    )
     private val _state = MutableStateFlow(
         ShoppingUiState(
             token = preferences.getString("token", null),
-            serverUrl = preferences.getString("serverUrl", "") ?: ""
+            serverUrl = preferences.getString("serverUrl", "") ?: "",
+            productCatalog = loadProductCatalog()
         )
     )
     val state: StateFlow<ShoppingUiState> = _state.asStateFlow()
@@ -118,6 +143,18 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun addCatalogProduct(name: String) {
+        val normalizedName = name.trim()
+        if (normalizedName.isBlank()) return
+        val catalog = _state.value.productCatalog
+        if (catalog.any { it.equals(normalizedName, ignoreCase = true) }) return
+        saveProductCatalog((catalog + normalizedName).sortedWith(String.CASE_INSENSITIVE_ORDER))
+    }
+
+    fun removeCatalogProduct(name: String) {
+        saveProductCatalog(_state.value.productCatalog.filterNot { it == name })
+    }
+
     fun selectList(listId: Int) = update { copy(selectedListId = listId) }
 
     private suspend fun runRequest(block: suspend () -> Unit) {
@@ -136,4 +173,25 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun api() = ApiClient.create(_state.value.serverUrl)
+
+    private fun loadProductCatalog(): List<String> {
+        val stored = preferences.getString("productCatalog", null)
+        return stored
+            ?.split("\n")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.distinct()
+            ?.sortedWith(String.CASE_INSENSITIVE_ORDER)
+            ?: defaultProducts
+    }
+
+    private fun saveProductCatalog(catalog: List<String>) {
+        val cleanedCatalog = catalog
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+        preferences.edit().putString("productCatalog", cleanedCatalog.joinToString("\n")).apply()
+        _state.value = _state.value.copy(productCatalog = cleanedCatalog)
+    }
 }

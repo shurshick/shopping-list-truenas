@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,14 +14,39 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.shoppinglist.mobile.ui.ShoppingUiState
 import com.shoppinglist.mobile.ui.ShoppingViewModel
@@ -41,7 +68,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val state by viewModel.state.collectAsState()
                     if (state.token == null) {
                         LoginScreen(
@@ -59,7 +86,9 @@ class MainActivity : ComponentActivity() {
                             viewModel::createList,
                             viewModel::createItem,
                             viewModel::toggleItem,
-                            viewModel::shareList
+                            viewModel::shareList,
+                            viewModel::addCatalogProduct,
+                            viewModel::removeCatalogProduct
                         )
                     }
                 }
@@ -83,28 +112,31 @@ private fun LoginScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text("Список покупок", style = MaterialTheme.typography.headlineMedium)
+        Text("Войдите или создайте аккаунт", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(24.dp))
         OutlinedTextField(
             state.serverUrl,
             onServerUrl,
             label = { Text("Адрес сервера") },
             placeholder = { Text("https://shopping.example.com") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
         )
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(state.email, onEmail, label = { Text("Email") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(state.email, onEmail, label = { Text("Email") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             state.password,
             onPassword,
             label = { Text("Пароль") },
             visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
         )
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onLogin(false) }, enabled = !state.isLoading) { Text("Войти") }
-            Button(onClick = { onLogin(true) }, enabled = !state.isLoading) { Text("Регистрация") }
+            OutlinedButton(onClick = { onLogin(true) }, enabled = !state.isLoading) { Text("Регистрация") }
         }
         state.message?.let {
             Spacer(Modifier.height(12.dp))
@@ -113,6 +145,7 @@ private fun LoginScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ShoppingScreen(
     state: ShoppingUiState,
@@ -121,88 +154,332 @@ private fun ShoppingScreen(
     onCreateList: (String) -> Unit,
     onCreateItem: (String, String) -> Unit,
     onToggleItem: (Int, Boolean) -> Unit,
-    onShareList: (String) -> Unit
+    onShareList: (String) -> Unit,
+    onAddCatalogProduct: (String) -> Unit,
+    onRemoveCatalogProduct: (String) -> Unit
 ) {
     var listName by remember { mutableStateOf("") }
     var itemName by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("") }
-    var shareEmail by remember { mutableStateOf("") }
+    var menuOpen by remember { mutableStateOf(false) }
+    var shareDialogOpen by remember { mutableStateOf(false) }
+    var catalogDialogOpen by remember { mutableStateOf(false) }
     val selectedList = state.lists.firstOrNull { it.id == state.selectedListId }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-            Text("Покупки", style = MaterialTheme.typography.headlineSmall)
-            Button(onClick = onSync, enabled = !state.isLoading) { Text("Обновить") }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Покупки")
+                        selectedList?.let {
+                            Text(it.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                },
+                navigationIcon = {
+                    Icon(Icons.Default.ShoppingCart, contentDescription = null, modifier = Modifier.padding(start = 16.dp))
+                },
+                actions = {
+                    IconButton(onClick = onSync, enabled = !state.isLoading) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Обновить")
+                    }
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Меню")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Открыть доступ") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            enabled = selectedList != null,
+                            onClick = {
+                                menuOpen = false
+                                shareDialogOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Справочник товаров") },
+                            leadingIcon = { Icon(Icons.Default.Storefront, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                catalogDialogOpen = true
+                            }
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+            )
         }
-
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(listName, { listName = it }, label = { Text("Новый список") }, modifier = Modifier.weight(1f))
-            Button(onClick = {
-                if (listName.isNotBlank()) {
-                    onCreateList(listName.trim())
-                    listName = ""
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                ListCreateCard(listName, { listName = it }) {
+                    if (listName.isNotBlank()) {
+                        onCreateList(listName.trim())
+                        listName = ""
+                    }
                 }
-            }) { Text("+") }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            state.lists.forEach { list ->
-                FilterChip(
-                    selected = list.id == state.selectedListId,
-                    onClick = { onSelectList(list.id) },
-                    label = { Text(list.name) }
-                )
             }
-        }
 
-        Spacer(Modifier.height(12.dp))
-        if (selectedList != null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(shareEmail, { shareEmail = it }, label = { Text("Email для доступа") }, modifier = Modifier.weight(1f))
-                Button(onClick = {
-                    if (shareEmail.isNotBlank()) {
-                        onShareList(shareEmail.trim())
-                        shareEmail = ""
+            if (state.lists.isNotEmpty()) {
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        items(state.lists) { list ->
+                            FilterChip(
+                                selected = list.id == state.selectedListId,
+                                onClick = { onSelectList(list.id) },
+                                label = { Text(list.name) }
+                            )
+                        }
                     }
-                }) { Text("Открыть") }
+                }
             }
 
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(itemName, { itemName = it }, label = { Text("Товар") }, modifier = Modifier.weight(1f))
-                OutlinedTextField(quantity, { quantity = it }, label = { Text("Кол-во") }, modifier = Modifier.weight(0.7f))
-                Button(onClick = {
-                    if (itemName.isNotBlank()) {
-                        onCreateItem(itemName.trim(), quantity.trim())
-                        itemName = ""
-                        quantity = ""
-                    }
-                }) { Text("+") }
-            }
+            if (selectedList != null) {
+                item {
+                    ItemCreateCard(
+                        itemName = itemName,
+                        quantity = quantity,
+                        catalog = state.productCatalog,
+                        onItemName = { itemName = it },
+                        onQuantity = { quantity = it },
+                        onPickSuggestion = { itemName = it },
+                        onAdd = {
+                            if (itemName.isNotBlank()) {
+                                onCreateItem(itemName.trim(), quantity.trim())
+                                itemName = ""
+                                quantity = ""
+                            }
+                        }
+                    )
+                }
 
-            LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
                 items(selectedList.items) { item ->
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Checkbox(
-                            checked = item.is_checked,
-                            onCheckedChange = { checked -> onToggleItem(item.id, checked) }
-                        )
-                        Text(
-                            text = listOf(item.name, item.quantity).filter { it.isNotBlank() }.joinToString(" - "),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Checkbox(
+                                checked = item.is_checked,
+                                onCheckedChange = { checked -> onToggleItem(item.id, checked) }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    textDecoration = if (item.is_checked) TextDecoration.LineThrough else TextDecoration.None
+                                )
+                                if (item.quantity.isNotBlank()) {
+                                    Text(item.quantity, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    ElevatedCard {
+                        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Создайте первый список", style = MaterialTheme.typography.titleMedium)
+                            Text("После создания здесь появятся товары и подсказки из справочника.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
-        } else {
-            Text("Создайте первый список покупок.")
-        }
 
-        state.message?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(it, color = MaterialTheme.colorScheme.error)
+            state.message?.let {
+                item {
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+            }
         }
     }
+
+    if (shareDialogOpen && selectedList != null) {
+        ShareDialog(
+            onDismiss = { shareDialogOpen = false },
+            onShare = {
+                onShareList(it)
+                shareDialogOpen = false
+            }
+        )
+    }
+
+    if (catalogDialogOpen) {
+        CatalogDialog(
+            catalog = state.productCatalog,
+            onDismiss = { catalogDialogOpen = false },
+            onAdd = onAddCatalogProduct,
+            onRemove = onRemoveCatalogProduct
+        )
+    }
+}
+
+@Composable
+private fun ListCreateCard(listName: String, onListName: (String) -> Unit, onAdd: () -> Unit) {
+    ElevatedCard {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                listName,
+                onListName,
+                label = { Text("Новый список") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Default.Add, contentDescription = "Создать список")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ItemCreateCard(
+    itemName: String,
+    quantity: String,
+    catalog: List<String>,
+    onItemName: (String) -> Unit,
+    onQuantity: (String) -> Unit,
+    onPickSuggestion: (String) -> Unit,
+    onAdd: () -> Unit
+) {
+    val suggestions = remember(itemName, catalog) {
+        val query = itemName.trim()
+        if (query.length < 2) {
+            emptyList()
+        } else {
+            catalog
+                .filter { it.contains(query, ignoreCase = true) && !it.equals(query, ignoreCase = true) }
+                .take(5)
+        }
+    }
+
+    ElevatedCard {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    itemName,
+                    onItemName,
+                    label = { Text("Товар") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    quantity,
+                    onQuantity,
+                    label = { Text("Кол-во") },
+                    modifier = Modifier.weight(0.65f),
+                    singleLine = true
+                )
+                IconButton(onClick = onAdd) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить товар")
+                }
+            }
+            if (suggestions.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Подсказки", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        items(suggestions) { suggestion ->
+                            AssistChip(onClick = { onPickSuggestion(suggestion) }, label = { Text(suggestion) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShareDialog(onDismiss: () -> Unit, onShare: (String) -> Unit) {
+    var email by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Открыть доступ") },
+        text = {
+            OutlinedTextField(
+                email,
+                { email = it },
+                label = { Text("Email пользователя") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            Button(onClick = { if (email.isNotBlank()) onShare(email.trim()) }) {
+                Text("Открыть")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@Composable
+private fun CatalogDialog(
+    catalog: List<String>,
+    onDismiss: () -> Unit,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit
+) {
+    var productName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Справочник товаров") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        productName,
+                        { productName = it },
+                        label = { Text("Название товара") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    IconButton(onClick = {
+                        if (productName.isNotBlank()) {
+                            onAdd(productName)
+                            productName = ""
+                        }
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = "Добавить в справочник")
+                    }
+                }
+                Divider()
+                LazyColumn(modifier = Modifier.height(320.dp)) {
+                    items(catalog) { product ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(product, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            IconButton(onClick = { onRemove(product) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Готово") }
+        }
+    )
 }
