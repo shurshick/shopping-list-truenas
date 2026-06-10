@@ -4,9 +4,13 @@ data class AuthRequest(val email: String, val password: String)
 data class TokenResponse(val access_token: String, val token_type: String)
 
 data class ListCreate(val name: String)
+data class ListUpdate(val name: String)
 data class ItemCreate(val name: String, val quantity: String = "")
 data class ItemUpdate(val name: String? = null, val quantity: String? = null, val is_checked: Boolean? = null)
 data class ShareRequest(val email: String)
+data class InviteResponse(val token: String, val url: String, val app_url: String)
+data class MembersResponse(val members: List<ListMemberDto>)
+data class ListMemberDto(val id: Int, val email: String, val is_owner: Boolean)
 
 data class SyncResponse(val lists: List<ShoppingListDto>)
 data class ShoppingListDto(

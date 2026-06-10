@@ -1,14 +1,21 @@
+import secrets
+from html import escape
+
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .database import Base, engine, get_db
-from .models import ListMember, ShoppingItem, ShoppingList, User
+from .models import ListInvite, ListMember, ShoppingItem, ShoppingList, User
 from .schemas import (
     AuthRequest,
+    InviteResponse,
     ItemCreate,
     ItemUpdate,
     ListCreate,
+    ListUpdate,
+    MembersResponse,
     PublicServerConfig,
     ShareRequest,
     SyncResponse,
@@ -35,6 +42,19 @@ def require_list_access(db: Session, user: User, list_id: int) -> ShoppingList:
     if shopping_list is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Список не найден")
     return shopping_list
+
+
+def require_list_owner(db: Session, user: User, list_id: int) -> ShoppingList:
+    shopping_list = db.scalar(select(ShoppingList).where(ShoppingList.id == list_id, ShoppingList.owner_id == user.id))
+    if shopping_list is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Список не найден")
+    return shopping_list
+
+
+def add_member_if_missing(db: Session, list_id: int, user_id: int) -> None:
+    exists = db.scalar(select(ListMember.id).where(ListMember.list_id == list_id, ListMember.user_id == user_id))
+    if exists is None:
+        db.add(ListMember(list_id=list_id, user_id=user_id))
 
 
 @app.get("/health")
@@ -96,6 +116,65 @@ def create_list(payload: ListCreate, current_user: User = Depends(get_current_us
     return {"id": shopping_list.id, "name": shopping_list.name}
 
 
+@app.patch("/lists/{list_id}")
+def update_list(
+    list_id: int,
+    payload: ListUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    shopping_list = require_list_owner(db, current_user, list_id)
+    shopping_list.name = payload.name
+    db.commit()
+    return {"id": shopping_list.id, "name": shopping_list.name}
+
+
+@app.delete("/lists/{list_id}")
+def delete_list(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_owner(db, current_user, list_id)
+    db.delete(shopping_list)
+    db.commit()
+    return {"status": "deleted"}
+
+
+@app.post("/lists/{list_id}/copy")
+def copy_list(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    source = require_list_access(db, current_user, list_id)
+    source_items = db.scalars(select(ShoppingItem).where(ShoppingItem.list_id == source.id)).all()
+    copied = ShoppingList(name=f"{source.name} копия", owner_id=current_user.id)
+    db.add(copied)
+    db.flush()
+    db.add(ListMember(list_id=copied.id, user_id=current_user.id))
+    for item in source_items:
+        db.add(
+            ShoppingItem(
+                list_id=copied.id,
+                name=item.name,
+                quantity=item.quantity,
+                is_checked=False,
+            )
+        )
+    db.commit()
+    return {"id": copied.id, "name": copied.name}
+
+
+@app.get("/lists/{list_id}/members", response_model=MembersResponse)
+def list_members(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_access(db, current_user, list_id)
+    rows = db.execute(
+        select(User.id, User.email)
+        .join(ListMember, ListMember.user_id == User.id)
+        .where(ListMember.list_id == shopping_list.id)
+        .order_by(User.email)
+    ).all()
+    return {
+        "members": [
+            {"id": user_id, "email": email, "is_owner": user_id == shopping_list.owner_id}
+            for user_id, email in rows
+        ]
+    }
+
+
 @app.post("/lists/{list_id}/share")
 def share_list(
     list_id: int,
@@ -107,10 +186,78 @@ def share_list(
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
-    if not db.scalar(select(ListMember).where(ListMember.list_id == shopping_list.id, ListMember.user_id == user.id)):
-        db.add(ListMember(list_id=shopping_list.id, user_id=user.id))
-        db.commit()
+    add_member_if_missing(db, shopping_list.id, user.id)
+    db.commit()
     return {"status": "shared"}
+
+
+@app.post("/lists/{list_id}/invite", response_model=InviteResponse)
+def create_invite(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_access(db, current_user, list_id)
+    invite = db.scalar(select(ListInvite).where(ListInvite.list_id == shopping_list.id))
+    if invite is None:
+        invite = ListInvite(
+            token=secrets.token_urlsafe(24),
+            list_id=shopping_list.id,
+            created_by_id=current_user.id,
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+    external_url = get_server_settings(db).external_url.rstrip("/")
+    web_url = f"{external_url}/join/{invite.token}" if external_url else f"/join/{invite.token}"
+    return {"token": invite.token, "url": web_url, "app_url": f"shoppinglist://join/{invite.token}"}
+
+
+@app.post("/invites/{token}/accept")
+def accept_invite(token: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
+    if invite is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
+    add_member_if_missing(db, invite.list_id, current_user.id)
+    db.commit()
+    return {"status": "joined", "list_id": invite.list_id}
+
+
+@app.get("/join/{token}", response_class=HTMLResponse)
+def join_page(token: str, db: Session = Depends(get_db)):
+    invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
+    if invite is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
+    shopping_list = db.get(ShoppingList, invite.list_id)
+    app_url = f"shoppinglist://join/{escape(token)}"
+    list_name = escape(shopping_list.name if shopping_list else "списку покупок")
+    return f"""
+    <!doctype html>
+    <html lang="ru">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Приглашение в список покупок</title>
+        <script>
+          window.addEventListener("load", function () {{
+            window.location.href = "{app_url}";
+          }});
+        </script>
+        <style>
+          body {{ font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1f2933; }}
+          main {{ max-width: 560px; margin: 0 auto; padding: 32px 18px; }}
+          section {{ background: white; border: 1px solid #dde3ea; border-radius: 8px; padding: 24px; }}
+          a {{ display: inline-block; margin-top: 16px; padding: 12px 16px; border-radius: 6px; background: #2364aa; color: white; text-decoration: none; font-weight: 700; }}
+        </style>
+      </head>
+      <body>
+        <main>
+          <section>
+            <h1>Доступ к списку</h1>
+            <p>Вам открыли доступ к списку «{list_name}».</p>
+            <a href="{app_url}">Открыть в приложении</a>
+          </section>
+        </main>
+      </body>
+    </html>
+    """
 
 
 @app.post("/lists/{list_id}/items")

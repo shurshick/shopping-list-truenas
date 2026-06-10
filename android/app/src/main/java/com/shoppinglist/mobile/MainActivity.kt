@@ -1,5 +1,9 @@
 package com.shoppinglist.mobile
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,12 +34,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -66,6 +71,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleInviteIntent(intent)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -87,11 +93,33 @@ class MainActivity : ComponentActivity() {
                             viewModel::createItem,
                             viewModel::toggleItem,
                             viewModel::shareList,
+                            viewModel::loadMembers,
+                            viewModel::renameSelectedList,
+                            viewModel::copySelectedList,
+                            viewModel::deleteSelectedList,
+                            viewModel::createInviteLink,
+                            viewModel::clearInviteUrl,
                             viewModel::addCatalogProduct,
                             viewModel::removeCatalogProduct
                         )
                     }
                 }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleInviteIntent(intent)
+    }
+
+    private fun handleInviteIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "shoppinglist" && data.host == "join") {
+            val token = data.pathSegments.firstOrNull()
+            if (!token.isNullOrBlank()) {
+                viewModel.acceptInvite(token)
             }
         }
     }
@@ -155,6 +183,12 @@ private fun ShoppingScreen(
     onCreateItem: (String, String) -> Unit,
     onToggleItem: (Int, Boolean) -> Unit,
     onShareList: (String) -> Unit,
+    onLoadMembers: () -> Unit,
+    onRenameList: (String) -> Unit,
+    onCopyList: () -> Unit,
+    onDeleteList: () -> Unit,
+    onCreateInviteLink: () -> Unit,
+    onClearInviteUrl: () -> Unit,
     onAddCatalogProduct: (String) -> Unit,
     onRemoveCatalogProduct: (String) -> Unit
 ) {
@@ -163,6 +197,10 @@ private fun ShoppingScreen(
     var quantity by remember { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
     var shareDialogOpen by remember { mutableStateOf(false) }
+    var membersDialogOpen by remember { mutableStateOf(false) }
+    var renameDialogOpen by remember { mutableStateOf(false) }
+    var deleteDialogOpen by remember { mutableStateOf(false) }
+    var inviteDialogOpen by remember { mutableStateOf(false) }
     var catalogDialogOpen by remember { mutableStateOf(false) }
     val selectedList = state.lists.firstOrNull { it.id == state.selectedListId }
 
@@ -189,12 +227,57 @@ private fun ShoppingScreen(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Открыть доступ") },
+                            text = { Text("Участники списка") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            enabled = selectedList != null,
+                            onClick = {
+                                menuOpen = false
+                                onLoadMembers()
+                                membersDialogOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Переименовать список") },
+                            enabled = selectedList != null,
+                            onClick = {
+                                menuOpen = false
+                                renameDialogOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Скопировать список") },
+                            enabled = selectedList != null,
+                            onClick = {
+                                menuOpen = false
+                                onCopyList()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Удалить список") },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            enabled = selectedList != null,
+                            onClick = {
+                                menuOpen = false
+                                deleteDialogOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Открыть доступ по email") },
                             leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                             enabled = selectedList != null,
                             onClick = {
                                 menuOpen = false
                                 shareDialogOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Ссылка-приглашение") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            enabled = selectedList != null,
+                            onClick = {
+                                menuOpen = false
+                                onCreateInviteLink()
+                                inviteDialogOpen = true
                             }
                         )
                         DropdownMenuItem(
@@ -310,6 +393,45 @@ private fun ShoppingScreen(
             onShare = {
                 onShareList(it)
                 shareDialogOpen = false
+            }
+        )
+    }
+
+    if (membersDialogOpen) {
+        MembersDialog(
+            members = state.selectedMembers,
+            onDismiss = { membersDialogOpen = false }
+        )
+    }
+
+    if (renameDialogOpen && selectedList != null) {
+        RenameListDialog(
+            currentName = selectedList.name,
+            onDismiss = { renameDialogOpen = false },
+            onSave = {
+                onRenameList(it)
+                renameDialogOpen = false
+            }
+        )
+    }
+
+    if (deleteDialogOpen && selectedList != null) {
+        ConfirmDeleteDialog(
+            listName = selectedList.name,
+            onDismiss = { deleteDialogOpen = false },
+            onDelete = {
+                onDeleteList()
+                deleteDialogOpen = false
+            }
+        )
+    }
+
+    if (inviteDialogOpen) {
+        InviteLinkDialog(
+            inviteUrl = state.inviteUrl,
+            onDismiss = {
+                inviteDialogOpen = false
+                onClearInviteUrl()
             }
         )
     }
@@ -431,6 +553,132 @@ private fun ShareDialog(onDismiss: () -> Unit, onShare: (String) -> Unit) {
 }
 
 @Composable
+private fun MembersDialog(members: List<com.shoppinglist.mobile.data.ListMemberDto>, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Участники списка") },
+        text = {
+            if (members.isEmpty()) {
+                Text("Загрузка участников...")
+            } else {
+                LazyColumn(modifier = Modifier.height(260.dp)) {
+                    items(members) { member ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(member.email, style = MaterialTheme.typography.bodyLarge)
+                                if (member.is_owner) {
+                                    Text("Владелец", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+@Composable
+private fun RenameListDialog(currentName: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var name by remember(currentName) { mutableStateOf(currentName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Переименовать список") },
+        text = {
+            OutlinedTextField(
+                name,
+                { name = it },
+                label = { Text("Название списка") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            Button(onClick = { if (name.isNotBlank()) onSave(name.trim()) }) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmDeleteDialog(listName: String, onDismiss: () -> Unit, onDelete: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Удалить список?") },
+        text = { Text("Список «$listName» будет удален для всех участников.") },
+        confirmButton = {
+            Button(onClick = onDelete) { Text("Удалить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@Composable
+private fun InviteLinkDialog(inviteUrl: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ссылка-приглашение") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Отправьте ссылку пользователю. После входа в приложение он автоматически присоединится к списку.")
+                if (inviteUrl.isBlank()) {
+                    Text("Создание ссылки...")
+                } else {
+                    OutlinedTextField(
+                        inviteUrl,
+                        {},
+                        label = { Text("Ссылка") },
+                        modifier = Modifier.fillMaxWidth(),
+                        readOnly = true
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, inviteUrl)
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Отправить ссылку"))
+                        }
+                    ) {
+                        Text("Отправить...")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = inviteUrl.isNotBlank(),
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Ссылка на список покупок", inviteUrl))
+                    onDismiss()
+                }
+            ) {
+                Text("Скопировать")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+@Composable
 private fun CatalogDialog(
     catalog: List<String>,
     onDismiss: () -> Unit,
@@ -460,7 +708,7 @@ private fun CatalogDialog(
                         Icon(Icons.Default.Add, contentDescription = "Добавить в справочник")
                     }
                 }
-                Divider()
+                HorizontalDivider()
                 LazyColumn(modifier = Modifier.height(320.dp)) {
                     items(catalog) { product ->
                         Row(

@@ -27,6 +27,10 @@ class ListCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class ListUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
 class ItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     quantity: str = Field(default="", max_length=80)
@@ -40,6 +44,22 @@ class ItemUpdate(BaseModel):
 
 class ShareRequest(BaseModel):
     email: EmailStr
+
+
+class ListMemberResponse(BaseModel):
+    id: int
+    email: EmailStr
+    is_owner: bool
+
+
+class MembersResponse(BaseModel):
+    members: list[ListMemberResponse]
+
+
+class InviteResponse(BaseModel):
+    token: str
+    url: str
+    app_url: str
 
 
 class SyncItem(BaseModel):

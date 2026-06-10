@@ -8,7 +8,9 @@ import com.shoppinglist.mobile.data.ApiClient
 import com.shoppinglist.mobile.data.AuthRequest
 import com.shoppinglist.mobile.data.ItemCreate
 import com.shoppinglist.mobile.data.ItemUpdate
+import com.shoppinglist.mobile.data.ListMemberDto
 import com.shoppinglist.mobile.data.ListCreate
+import com.shoppinglist.mobile.data.ListUpdate
 import com.shoppinglist.mobile.data.ShareRequest
 import com.shoppinglist.mobile.data.ShoppingListDto
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +24,9 @@ data class ShoppingUiState(
     val email: String = "",
     val password: String = "",
     val lists: List<ShoppingListDto> = emptyList(),
+    val selectedMembers: List<ListMemberDto> = emptyList(),
+    val inviteUrl: String = "",
+    val pendingInviteToken: String? = null,
     val productCatalog: List<String> = emptyList(),
     val selectedListId: Int? = null,
     val message: String? = null,
@@ -87,6 +92,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
                 .apply()
             _state.value = current.copy(token = response.access_token, password = "", message = null)
             sync()
+            _state.value.pendingInviteToken?.let { acceptInvite(it) }
         }
     }
 
@@ -143,6 +149,67 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun loadMembers() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            val response = api().listMembers("Bearer $token", listId)
+            _state.value = _state.value.copy(selectedMembers = response.members)
+        }
+    }
+
+    fun renameSelectedList(name: String) = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            api().updateList("Bearer $token", listId, ListUpdate(name))
+            sync()
+        }
+    }
+
+    fun copySelectedList() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            api().copyList("Bearer $token", listId)
+            sync()
+        }
+    }
+
+    fun deleteSelectedList() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            api().deleteList("Bearer $token", listId)
+            _state.value = _state.value.copy(selectedListId = null)
+            sync()
+        }
+    }
+
+    fun createInviteLink() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            val invite = api().createInvite("Bearer $token", listId)
+            _state.value = _state.value.copy(inviteUrl = invite.url, message = "Ссылка приглашения создана")
+        }
+    }
+
+    fun acceptInvite(token: String) = viewModelScope.launch {
+        val authToken = _state.value.token
+        if (authToken == null) {
+            _state.value = _state.value.copy(pendingInviteToken = token, message = "Войдите, чтобы присоединиться к списку")
+            return@launch
+        }
+        runRequest {
+            api().acceptInvite("Bearer $authToken", token)
+            _state.value = _state.value.copy(pendingInviteToken = null, message = "Вы присоединились к списку")
+            sync()
+        }
+    }
+
+    fun clearInviteUrl() = update { copy(inviteUrl = "") }
+
     fun addCatalogProduct(name: String) {
         val normalizedName = name.trim()
         if (normalizedName.isBlank()) return
@@ -155,7 +222,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         saveProductCatalog(_state.value.productCatalog.filterNot { it == name })
     }
 
-    fun selectList(listId: Int) = update { copy(selectedListId = listId) }
+    fun selectList(listId: Int) = update { copy(selectedListId = listId, selectedMembers = emptyList(), inviteUrl = "") }
 
     private suspend fun runRequest(block: suspend () -> Unit) {
         _state.value = _state.value.copy(isLoading = true, message = null)

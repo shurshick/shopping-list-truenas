@@ -21,6 +21,25 @@ interface ShoppingApi {
     @POST("lists")
     suspend fun createList(@Header("Authorization") authorization: String, @Body request: ListCreate)
 
+    @PATCH("lists/{listId}")
+    suspend fun updateList(
+        @Header("Authorization") authorization: String,
+        @Path("listId") listId: Int,
+        @Body request: ListUpdate
+    )
+
+    @DELETE("lists/{listId}")
+    suspend fun deleteList(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
+
+    @POST("lists/{listId}/copy")
+    suspend fun copyList(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
+
+    @GET("lists/{listId}/members")
+    suspend fun listMembers(
+        @Header("Authorization") authorization: String,
+        @Path("listId") listId: Int
+    ): MembersResponse
+
     @POST("lists/{listId}/items")
     suspend fun createItem(
         @Header("Authorization") authorization: String,
@@ -34,6 +53,15 @@ interface ShoppingApi {
         @Path("listId") listId: Int,
         @Body request: ShareRequest
     )
+
+    @POST("lists/{listId}/invite")
+    suspend fun createInvite(
+        @Header("Authorization") authorization: String,
+        @Path("listId") listId: Int
+    ): InviteResponse
+
+    @POST("invites/{token}/accept")
+    suspend fun acceptInvite(@Header("Authorization") authorization: String, @Path("token") token: String)
 
     @PATCH("items/{itemId}")
     suspend fun updateItem(
