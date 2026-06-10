@@ -1,0 +1,54 @@
+# Развертывание на TrueNAS
+
+## Контейнеры
+
+В проекте уже есть `docker-compose.yml`:
+
+- `postgres` - база данных.
+- `api` - сервер приложения.
+
+Перед запуском создайте `.env` рядом с `docker-compose.yml`:
+
+```env
+POSTGRES_PASSWORD=long-random-password
+JWT_SECRET=another-long-random-secret
+API_PORT=8000
+```
+
+Запуск:
+
+```bash
+docker compose up -d --build
+```
+
+Проверка:
+
+```bash
+curl http://truenas-ip:8000/health
+```
+
+## Доступ из интернета
+
+Рекомендуемая схема:
+
+```text
+Android app -> HTTPS domain -> reverse proxy -> api:8000
+```
+
+Подойдут Nginx Proxy Manager, Caddy или Traefik. Снаружи лучше публиковать только HTTPS-порт `443`, а не открывать `8000` напрямую.
+
+После настройки домена замените адрес в Android-проекте:
+
+```kotlin
+buildConfigField("String", "API_BASE_URL", "\"https://your-domain.example/\"")
+```
+
+Файл: `android/app/build.gradle.kts`.
+
+## Первые учетные записи
+
+Пользователи регистрируются в приложении. Чтобы поделиться списком:
+
+1. Второй пользователь сначала регистрируется.
+2. Первый пользователь открывает список и вводит email второго пользователя в поле доступа.
+3. При следующем запуске или нажатии "Обновить" список появится у второго пользователя.

@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.gradle/
+build/
+local.properties
+outputs/
+work/
