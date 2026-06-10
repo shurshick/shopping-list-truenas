@@ -60,13 +60,7 @@ Android app -> HTTPS domain -> reverse proxy -> api:8000
 
 Подойдут Nginx Proxy Manager, Caddy или Traefik. Снаружи лучше публиковать только HTTPS-порт `443`, а не открывать `8000` напрямую.
 
-После настройки домена замените адрес в Android-проекте:
-
-```kotlin
-buildConfigField("String", "API_BASE_URL", "\"https://your-domain.example/\"")
-```
-
-Файл: `android/app/build.gradle.kts`.
+В Android-приложении адрес сервера вводится на экране входа.
 
 ## Первые учетные записи
 

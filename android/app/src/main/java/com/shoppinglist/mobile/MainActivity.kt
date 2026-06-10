@@ -44,7 +44,13 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val state by viewModel.state.collectAsState()
                     if (state.token == null) {
-                        LoginScreen(state, viewModel::setEmail, viewModel::setPassword, viewModel::login)
+                        LoginScreen(
+                            state,
+                            viewModel::setServerUrl,
+                            viewModel::setEmail,
+                            viewModel::setPassword,
+                            viewModel::login
+                        )
                     } else {
                         ShoppingScreen(
                             state,
@@ -65,6 +71,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun LoginScreen(
     state: ShoppingUiState,
+    onServerUrl: (String) -> Unit,
     onEmail: (String) -> Unit,
     onPassword: (String) -> Unit,
     onLogin: (Boolean) -> Unit
@@ -77,6 +84,14 @@ private fun LoginScreen(
     ) {
         Text("Список покупок", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(24.dp))
+        OutlinedTextField(
+            state.serverUrl,
+            onServerUrl,
+            label = { Text("Адрес сервера") },
+            placeholder = { Text("https://shopping.example.com") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(state.email, onEmail, label = { Text("Email") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(

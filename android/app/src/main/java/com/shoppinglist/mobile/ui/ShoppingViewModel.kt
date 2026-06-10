@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 
 data class ShoppingUiState(
     val token: String? = null,
+    val serverUrl: String = "",
     val email: String = "",
     val password: String = "",
     val lists: List<ShoppingListDto> = emptyList(),
@@ -28,8 +29,12 @@ data class ShoppingUiState(
 
 class ShoppingViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("shopping-list", Context.MODE_PRIVATE)
-    private val api = ApiClient.api
-    private val _state = MutableStateFlow(ShoppingUiState(token = preferences.getString("token", null)))
+    private val _state = MutableStateFlow(
+        ShoppingUiState(
+            token = preferences.getString("token", null),
+            serverUrl = preferences.getString("serverUrl", "") ?: ""
+        )
+    )
     val state: StateFlow<ShoppingUiState> = _state.asStateFlow()
 
     init {
@@ -38,18 +43,23 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setServerUrl(value: String) = update { copy(serverUrl = value) }
     fun setEmail(value: String) = update { copy(email = value) }
     fun setPassword(value: String) = update { copy(password = value) }
 
     fun login(register: Boolean = false) = viewModelScope.launch {
         runRequest {
             val current = _state.value
+            val api = api()
             val response = if (register) {
                 api.register(AuthRequest(current.email, current.password))
             } else {
                 api.login(AuthRequest(current.email, current.password))
             }
-            preferences.edit().putString("token", response.access_token).apply()
+            preferences.edit()
+                .putString("token", response.access_token)
+                .putString("serverUrl", current.serverUrl.trim())
+                .apply()
             _state.value = current.copy(token = response.access_token, password = "", message = null)
             sync()
         }
@@ -58,6 +68,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     fun sync() = viewModelScope.launch {
         val token = _state.value.token ?: return@launch
         runRequest {
+            val api = api()
             val response = api.sync("Bearer $token")
             val selectedListId = _state.value.selectedListId
             val nextSelected = response.lists.firstOrNull { it.id == selectedListId }?.id ?: response.lists.firstOrNull()?.id
@@ -72,6 +83,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     fun createList(name: String) = viewModelScope.launch {
         val token = _state.value.token ?: return@launch
         runRequest {
+            val api = api()
             api.createList("Bearer $token", ListCreate(name))
             sync()
         }
@@ -81,6 +93,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         val token = _state.value.token ?: return@launch
         val listId = _state.value.selectedListId ?: return@launch
         runRequest {
+            val api = api()
             api.createItem("Bearer $token", listId, ItemCreate(name, quantity))
             sync()
         }
@@ -89,6 +102,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     fun toggleItem(itemId: Int, checked: Boolean) = viewModelScope.launch {
         val token = _state.value.token ?: return@launch
         runRequest {
+            val api = api()
             api.updateItem("Bearer $token", itemId, ItemUpdate(is_checked = checked))
             sync()
         }
@@ -98,6 +112,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         val token = _state.value.token ?: return@launch
         val listId = _state.value.selectedListId ?: return@launch
         runRequest {
+            val api = api()
             api.shareList("Bearer $token", listId, ShareRequest(email))
             _state.value = _state.value.copy(message = "Список открыт для $email")
         }
@@ -119,4 +134,6 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     private fun update(block: ShoppingUiState.() -> ShoppingUiState) {
         _state.value = _state.value.block()
     }
+
+    private fun api() = ApiClient.create(_state.value.serverUrl)
 }
