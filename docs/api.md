@@ -7,6 +7,8 @@ Base URL: `https://your-domain.example`
 - `POST /auth/register`
 - `POST /auth/login`
 
+Обычная регистрация пользователей доступна только после завершения мастера `/setup`.
+
 Body:
 
 ```json

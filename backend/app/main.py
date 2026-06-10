@@ -1,5 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .database import Base, engine, get_db
@@ -19,6 +19,8 @@ from .setup import get_server_settings, router as setup_router
 
 
 Base.metadata.create_all(bind=engine)
+with engine.begin() as connection:
+    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
 
 app = FastAPI(title="Shopping List Sync API", version="0.1.0")
 app.include_router(setup_router)
@@ -47,7 +49,10 @@ def server_config(db: Session = Depends(get_db)):
 
 @app.post("/auth/register", response_model=TokenResponse)
 def register(payload: AuthRequest, db: Session = Depends(get_db)):
-    if not get_server_settings(db).allow_registration:
+    server_settings = get_server_settings(db)
+    if not server_settings.setup_completed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Server setup is not completed")
+    if not server_settings.allow_registration:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is disabled")
 
     email = payload.email.lower()

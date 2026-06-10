@@ -1,13 +1,13 @@
 from html import escape
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import settings
 from .database import get_db
-from .models import ServerSetting
+from .models import ServerSetting, User
+from .security import hash_password, verify_password
 
 
 router = APIRouter()
@@ -23,58 +23,24 @@ def get_server_settings(db: Session) -> ServerSetting:
     return server_settings
 
 
-def verify_setup_token(token: str | None) -> None:
-    if settings.setup_token and token != settings.setup_token:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Wrong setup token")
+def has_admin_user(db: Session) -> bool:
+    return db.scalar(select(User.id).where(User.is_admin.is_(True)).limit(1)) is not None
 
 
-def has_setup_access(server_settings: ServerSetting, token: str | None) -> bool:
-    if not server_settings.setup_completed:
-        return True
-    return bool(settings.setup_token and token == settings.setup_token)
+def verify_admin(db: Session, email: str, password: str) -> User:
+    user = db.scalar(select(User).where(User.email == email.lower(), User.is_admin.is_(True)))
+    if user is None or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Wrong administrator email or password")
+    return user
 
 
-def render_locked_page(server_settings: ServerSetting) -> str:
-    return f"""
-    <!doctype html>
-    <html lang="ru">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Shopping List setup</title>
-        <style>
-          :root {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-          body {{ margin: 0; background: #f6f7f9; color: #1f2933; }}
-          main {{ max-width: 680px; margin: 0 auto; padding: 32px 18px; }}
-          section {{ background: #ffffff; border: 1px solid #dde3ea; border-radius: 8px; padding: 24px; }}
-          h1 {{ margin: 0 0 8px; font-size: 28px; }}
-          p {{ margin: 0 0 14px; color: #52616f; line-height: 1.5; }}
-          code {{ background: #eef2f6; padding: 2px 5px; border-radius: 4px; }}
-        </style>
-      </head>
-      <body>
-        <main>
-          <section>
-            <h1>Setup is complete</h1>
-            <p>The server is configured and the first-run wizard is locked.</p>
-            <p>External address: <code>{escape(server_settings.external_url)}</code></p>
-            <p>To reconfigure from the web UI later, set <code>SETUP_TOKEN</code> for the API container and open <code>/setup?token=your-token</code>.</p>
-          </section>
-        </main>
-      </body>
-    </html>
-    """
-
-
-def render_setup_page(server_settings: ServerSetting, token: str = "", message: str = "") -> str:
-    token_field = ""
-    if server_settings.setup_completed and settings.setup_token:
-        token_field = f"""
-              <label for="token">Admin token</label>
-              <input id="token" name="token" type="password" value="{escape(token)}" autocomplete="current-password" />
-        """
-    else:
-        token_field = f'<input name="token" type="hidden" value="{escape(token)}" />'
+def render_setup_page(server_settings: ServerSetting, needs_admin_creation: bool, message: str = "") -> str:
+    admin_title = "Create administrator" if needs_admin_creation else "Administrator login"
+    password_extra = """
+              <label for="admin_password_confirm">Repeat administrator password</label>
+              <input id="admin_password_confirm" name="admin_password_confirm" type="password" required minlength="8" autocomplete="new-password" />
+    """ if needs_admin_creation else ""
+    password_autocomplete = "new-password" if needs_admin_creation else "current-password"
 
     return f"""
     <!doctype html>
@@ -88,37 +54,19 @@ def render_setup_page(server_settings: ServerSetting, token: str = "", message: 
             color-scheme: light;
             font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           }}
-          body {{
-            margin: 0;
-            background: #f6f7f9;
-            color: #1f2933;
-          }}
-          main {{
-            max-width: 680px;
-            margin: 0 auto;
-            padding: 32px 18px;
-          }}
+          body {{ margin: 0; background: #f6f7f9; color: #1f2933; }}
+          main {{ max-width: 680px; margin: 0 auto; padding: 32px 18px; }}
           section {{
             background: #ffffff;
             border: 1px solid #dde3ea;
             border-radius: 8px;
             padding: 24px;
           }}
-          h1 {{
-            margin: 0 0 8px;
-            font-size: 28px;
-          }}
-          p {{
-            margin: 0 0 20px;
-            color: #52616f;
-            line-height: 1.5;
-          }}
-          label {{
-            display: block;
-            margin: 14px 0 6px;
-            font-weight: 650;
-          }}
-          input[type="text"], input[type="password"], input[type="url"] {{
+          h1 {{ margin: 0 0 8px; font-size: 28px; }}
+          h2 {{ margin: 22px 0 8px; font-size: 18px; }}
+          p {{ margin: 0 0 20px; color: #52616f; line-height: 1.5; }}
+          label {{ display: block; margin: 14px 0 6px; font-weight: 650; }}
+          input[type="email"], input[type="text"], input[type="password"], input[type="url"] {{
             box-sizing: border-box;
             width: 100%;
             min-height: 44px;
@@ -127,16 +75,8 @@ def render_setup_page(server_settings: ServerSetting, token: str = "", message: 
             padding: 10px 12px;
             font: inherit;
           }}
-          .row {{
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin-top: 14px;
-          }}
-          .row input {{
-            width: 18px;
-            height: 18px;
-          }}
+          .row {{ display: flex; gap: 10px; align-items: center; margin-top: 14px; }}
+          .row input {{ width: 18px; height: 18px; }}
           button {{
             margin-top: 22px;
             min-height: 44px;
@@ -156,29 +96,25 @@ def render_setup_page(server_settings: ServerSetting, token: str = "", message: 
             background: #e7f5ec;
             color: #14532d;
           }}
-          .warning {{
-            margin-bottom: 16px;
-            padding: 12px;
-            border-radius: 6px;
-            background: #fff7ed;
-            color: #9a3412;
-          }}
-          code {{
-            background: #eef2f6;
-            padding: 2px 5px;
-            border-radius: 4px;
-          }}
+          code {{ background: #eef2f6; padding: 2px 5px; border-radius: 4px; }}
         </style>
       </head>
       <body>
         <main>
           <section>
             <h1>Shopping List setup</h1>
-            <p>Configure the public server address and key runtime options after Docker startup.</p>
+            <p>Configure the server and administrator account.</p>
             {f'<div class="message">{escape(message)}</div>' if message else ''}
             <form method="post" action="/setup">
-              {token_field}
+              <h2>{admin_title}</h2>
+              <label for="admin_email">Administrator email</label>
+              <input id="admin_email" name="admin_email" type="email" required maxlength="255" autocomplete="username" />
 
+              <label for="admin_password">Administrator password</label>
+              <input id="admin_password" name="admin_password" type="password" required minlength="8" autocomplete="{password_autocomplete}" />
+              {password_extra}
+
+              <h2>Server settings</h2>
               <label for="app_name">App name</label>
               <input id="app_name" name="app_name" type="text" value="{escape(server_settings.app_name)}" required maxlength="80" />
 
@@ -201,41 +137,49 @@ def render_setup_page(server_settings: ServerSetting, token: str = "", message: 
 
 
 @router.get("/setup", response_class=HTMLResponse)
-def setup_page(token: str = "", message: str = "", db: Session = Depends(get_db)):
+def setup_page(message: str = "", db: Session = Depends(get_db)):
     server_settings = get_server_settings(db)
-    if not has_setup_access(server_settings, token or None):
-        return render_locked_page(server_settings)
-
-    if server_settings.setup_completed:
-        verify_setup_token(token or None)
-    return render_setup_page(server_settings, token=token, message=message)
+    return render_setup_page(
+        server_settings,
+        needs_admin_creation=not has_admin_user(db),
+        message=message,
+    )
 
 
 @router.post("/setup")
 def save_setup(
-    token: str = Form(default=""),
+    admin_email: str = Form(...),
+    admin_password: str = Form(...),
+    admin_password_confirm: str = Form(default=""),
     app_name: str = Form(...),
     external_url: str = Form(...),
     allow_registration: bool = Form(default=False),
     db: Session = Depends(get_db),
 ):
-    server_settings = get_server_settings(db)
-    if not has_setup_access(server_settings, token or None):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Setup is already completed")
-    if server_settings.setup_completed:
-        verify_setup_token(token or None)
+    needs_admin_creation = not has_admin_user(db)
+    email = admin_email.strip().lower()
+
+    if len(admin_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Administrator password is too short")
+
+    if needs_admin_creation:
+        if admin_password != admin_password_confirm:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Administrator passwords do not match")
+        if db.scalar(select(User.id).where(User.email == email)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
+        db.add(User(email=email, password_hash=hash_password(admin_password), is_admin=True))
+    else:
+        verify_admin(db, email, admin_password)
 
     normalized_url = external_url.strip().rstrip("/")
     if not normalized_url.startswith("https://"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="External address must start with https://")
 
+    server_settings = get_server_settings(db)
     server_settings.app_name = app_name.strip()
     server_settings.external_url = normalized_url
     server_settings.allow_registration = allow_registration
     server_settings.setup_completed = True
     db.commit()
 
-    redirect_url = "/setup?message=Settings%20saved"
-    if token:
-        redirect_url = f"/setup?token={quote(token)}&message=Settings%20saved"
-    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/setup?message=Settings%20saved", status_code=status.HTTP_303_SEE_OTHER)
