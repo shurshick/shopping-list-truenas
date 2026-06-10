@@ -15,6 +15,8 @@
 docker compose up -d --build
 ```
 
+Для запуска готового серверного образа напрямую из GitHub Container Registry используйте `docker-compose.ghcr.yml`. Подробная инструкция: `docs/github-deploy.md`.
+
 Проверка:
 
 ```powershell

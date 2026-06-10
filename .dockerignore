@@ -1,0 +1,7 @@
+.git
+.gradle
+android
+outputs
+work
+**/__pycache__
+**/*.pyc
