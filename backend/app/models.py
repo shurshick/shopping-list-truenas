@@ -15,6 +15,17 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class ServerSetting(Base):
+    __tablename__ = "server_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    app_name: Mapped[str] = mapped_column(String(80), default="Shopping List")
+    external_url: Mapped[str] = mapped_column(String(255), default="")
+    allow_registration: Mapped[bool] = mapped_column(Boolean, default=True)
+    setup_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class ShoppingList(Base):
     __tablename__ = "shopping_lists"
 

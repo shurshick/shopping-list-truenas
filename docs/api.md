@@ -35,6 +35,21 @@ Header:
 Authorization: Bearer <token>
 ```
 
+## Server config
+
+`GET /server-config`
+
+Response:
+
+```json
+{
+  "app_name": "Shopping List",
+  "external_url": "https://shopping.example.com",
+  "allow_registration": true,
+  "setup_completed": true
+}
+```
+
 ## Lists
 
 - `POST /lists` - создать список.

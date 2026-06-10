@@ -9,16 +9,19 @@ from .schemas import (
     ItemCreate,
     ItemUpdate,
     ListCreate,
+    PublicServerConfig,
     ShareRequest,
     SyncResponse,
     TokenResponse,
 )
 from .security import create_access_token, get_current_user, hash_password, verify_password
+from .setup import get_server_settings, router as setup_router
 
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Shopping List Sync API", version="0.1.0")
+app.include_router(setup_router)
 
 
 def require_list_access(db: Session, user: User, list_id: int) -> ShoppingList:
@@ -37,8 +40,16 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/server-config", response_model=PublicServerConfig)
+def server_config(db: Session = Depends(get_db)):
+    return get_server_settings(db)
+
+
 @app.post("/auth/register", response_model=TokenResponse)
 def register(payload: AuthRequest, db: Session = Depends(get_db)):
+    if not get_server_settings(db).allow_registration:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is disabled")
+
     email = payload.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")

@@ -21,6 +21,16 @@ docker compose up -d --build
 curl http://localhost:8000/health
 ```
 
+## Первичная настройка после запуска
+
+После запуска Docker откройте:
+
+```text
+http://truenas-ip:8000/setup
+```
+
+Введите `SETUP_TOKEN` из `.env`, внешний HTTPS-адрес сервера и параметры регистрации пользователей.
+
 ## Доступ извне
 
 Для доступа из интернета лучше использовать доменное имя и HTTPS через reverse proxy на TrueNAS, например Nginx Proxy Manager, Caddy или Traefik. Публиковать API напрямую без HTTPS не стоит, потому что приложение передает логин, пароль и токен авторизации.

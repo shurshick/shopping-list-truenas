@@ -12,6 +12,7 @@
 ```env
 POSTGRES_PASSWORD=long-random-password
 JWT_SECRET=another-long-random-secret
+SETUP_TOKEN=setup-page-password
 API_PORT=8000
 ```
 
@@ -25,6 +26,26 @@ docker compose up -d --build
 
 ```bash
 curl http://truenas-ip:8000/health
+```
+
+## Мастер настройки
+
+После запуска откройте:
+
+```text
+http://truenas-ip:8000/setup
+```
+
+Введите `SETUP_TOKEN` из `.env`. В мастере можно задать:
+
+- внешний HTTPS-адрес сервера;
+- название приложения;
+- разрешена ли регистрация новых пользователей.
+
+Публичная конфигурация доступна по адресу:
+
+```text
+https://your-domain.example/server-config
 ```
 
 ## Доступ из интернета

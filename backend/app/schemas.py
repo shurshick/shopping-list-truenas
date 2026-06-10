@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from pydantic import ConfigDict
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -11,6 +12,15 @@ class AuthRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class PublicServerConfig(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    app_name: str
+    external_url: str
+    allow_registration: bool
+    setup_completed: bool
 
 
 class ListCreate(BaseModel):
