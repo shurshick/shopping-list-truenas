@@ -22,8 +22,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -92,11 +97,13 @@ class MainActivity : ComponentActivity() {
                             viewModel::createList,
                             viewModel::createItem,
                             viewModel::toggleItem,
+                            viewModel::deleteItem,
                             viewModel::shareList,
                             viewModel::loadMembers,
                             viewModel::renameSelectedList,
                             viewModel::copySelectedList,
                             viewModel::deleteSelectedList,
+                            viewModel::clearSelectedList,
                             viewModel::createInviteLink,
                             viewModel::clearInviteUrl,
                             viewModel::addCatalogProduct,
@@ -182,24 +189,29 @@ private fun ShoppingScreen(
     onCreateList: (String) -> Unit,
     onCreateItem: (String, String) -> Unit,
     onToggleItem: (Int, Boolean) -> Unit,
+    onDeleteItem: (Int) -> Unit,
     onShareList: (String) -> Unit,
     onLoadMembers: () -> Unit,
     onRenameList: (String) -> Unit,
     onCopyList: () -> Unit,
     onDeleteList: () -> Unit,
+    onClearList: () -> Unit,
     onCreateInviteLink: () -> Unit,
     onClearInviteUrl: () -> Unit,
     onAddCatalogProduct: (String) -> Unit,
     onRemoveCatalogProduct: (String) -> Unit
 ) {
-    var listName by remember { mutableStateOf("") }
     var itemName by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
+    var listMenuOpen by remember { mutableStateOf(false) }
+    var createListDialogOpen by remember { mutableStateOf(false) }
+    var selectListDialogOpen by remember { mutableStateOf(false) }
     var shareDialogOpen by remember { mutableStateOf(false) }
     var membersDialogOpen by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var deleteDialogOpen by remember { mutableStateOf(false) }
+    var clearDialogOpen by remember { mutableStateOf(false) }
     var inviteDialogOpen by remember { mutableStateOf(false) }
     var catalogDialogOpen by remember { mutableStateOf(false) }
     val selectedList = state.lists.firstOrNull { it.id == state.selectedListId }
@@ -219,65 +231,61 @@ private fun ShoppingScreen(
                     Icon(Icons.Default.ShoppingCart, contentDescription = null, modifier = Modifier.padding(start = 16.dp))
                 },
                 actions = {
+                    IconButton(onClick = { createListDialogOpen = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Создать список")
+                    }
                     IconButton(onClick = onSync, enabled = !state.isLoading) {
                         Icon(Icons.Default.Refresh, contentDescription = "Обновить")
                     }
+                    IconButton(onClick = { listMenuOpen = true }, enabled = selectedList != null) {
+                        Icon(Icons.Default.ShoppingCart, contentDescription = "Меню списка")
+                    }
+                    ListDropdownMenu(
+                        expanded = listMenuOpen,
+                        onDismiss = { listMenuOpen = false },
+                        enabled = selectedList != null,
+                        onMembers = {
+                            listMenuOpen = false
+                            onLoadMembers()
+                            membersDialogOpen = true
+                        },
+                        onRename = {
+                            listMenuOpen = false
+                            renameDialogOpen = true
+                        },
+                        onCopy = {
+                            listMenuOpen = false
+                            onCopyList()
+                        },
+                        onClear = {
+                            listMenuOpen = false
+                            clearDialogOpen = true
+                        },
+                        onDelete = {
+                            listMenuOpen = false
+                            deleteDialogOpen = true
+                        },
+                        onShareByEmail = {
+                            listMenuOpen = false
+                            shareDialogOpen = true
+                        },
+                        onInvite = {
+                            listMenuOpen = false
+                            onCreateInviteLink()
+                            inviteDialogOpen = true
+                        }
+                    )
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Меню")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Участники списка") },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                            enabled = selectedList != null,
+                            text = { Text("Выбрать список") },
+                            leadingIcon = { Icon(Icons.Default.ShoppingCart, contentDescription = null) },
+                            enabled = state.lists.isNotEmpty(),
                             onClick = {
                                 menuOpen = false
-                                onLoadMembers()
-                                membersDialogOpen = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Переименовать список") },
-                            enabled = selectedList != null,
-                            onClick = {
-                                menuOpen = false
-                                renameDialogOpen = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Скопировать список") },
-                            enabled = selectedList != null,
-                            onClick = {
-                                menuOpen = false
-                                onCopyList()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Удалить список") },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            enabled = selectedList != null,
-                            onClick = {
-                                menuOpen = false
-                                deleteDialogOpen = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Открыть доступ по email") },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                            enabled = selectedList != null,
-                            onClick = {
-                                menuOpen = false
-                                shareDialogOpen = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Ссылка-приглашение") },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                            enabled = selectedList != null,
-                            onClick = {
-                                menuOpen = false
-                                onCreateInviteLink()
-                                inviteDialogOpen = true
+                                selectListDialogOpen = true
                             }
                         )
                         DropdownMenuItem(
@@ -301,29 +309,6 @@ private fun ShoppingScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            item {
-                ListCreateCard(listName, { listName = it }) {
-                    if (listName.isNotBlank()) {
-                        onCreateList(listName.trim())
-                        listName = ""
-                    }
-                }
-            }
-
-            if (state.lists.isNotEmpty()) {
-                item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        items(state.lists) { list ->
-                            FilterChip(
-                                selected = list.id == state.selectedListId,
-                                onClick = { onSelectList(list.id) },
-                                label = { Text(list.name) }
-                            )
-                        }
-                    }
-                }
-            }
-
             if (selectedList != null) {
                 item {
                     ItemCreateCard(
@@ -365,6 +350,9 @@ private fun ShoppingScreen(
                                     Text(item.quantity, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
+                            IconButton(onClick = { onDeleteItem(item.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Удалить товар")
+                            }
                         }
                     }
                 }
@@ -373,7 +361,7 @@ private fun ShoppingScreen(
                     ElevatedCard {
                         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Создайте первый список", style = MaterialTheme.typography.titleMedium)
-                            Text("После создания здесь появятся товары и подсказки из справочника.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Нажмите + в верхней панели, чтобы добавить список.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -385,6 +373,28 @@ private fun ShoppingScreen(
                 }
             }
         }
+    }
+
+    if (createListDialogOpen) {
+        CreateListDialog(
+            onDismiss = { createListDialogOpen = false },
+            onCreate = {
+                onCreateList(it)
+                createListDialogOpen = false
+            }
+        )
+    }
+
+    if (selectListDialogOpen) {
+        SelectListDialog(
+            lists = state.lists,
+            selectedListId = state.selectedListId,
+            onDismiss = { selectListDialogOpen = false },
+            onSelect = {
+                onSelectList(it)
+                selectListDialogOpen = false
+            }
+        )
     }
 
     if (shareDialogOpen && selectedList != null) {
@@ -426,6 +436,17 @@ private fun ShoppingScreen(
         )
     }
 
+    if (clearDialogOpen && selectedList != null) {
+        ConfirmClearDialog(
+            listName = selectedList.name,
+            onDismiss = { clearDialogOpen = false },
+            onClear = {
+                onClearList()
+                clearDialogOpen = false
+            }
+        )
+    }
+
     if (inviteDialogOpen) {
         InviteLinkDialog(
             inviteUrl = state.inviteUrl,
@@ -443,30 +464,6 @@ private fun ShoppingScreen(
             onAdd = onAddCatalogProduct,
             onRemove = onRemoveCatalogProduct
         )
-    }
-}
-
-@Composable
-private fun ListCreateCard(listName: String, onListName: (String) -> Unit, onAdd: () -> Unit) {
-    ElevatedCard {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                listName,
-                onListName,
-                label = { Text("Новый список") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            IconButton(onClick = onAdd) {
-                Icon(Icons.Default.Add, contentDescription = "Создать список")
-            }
-        }
     }
 }
 
@@ -524,6 +521,121 @@ private fun ItemCreateCard(
             }
         }
     }
+}
+
+@Composable
+private fun ListDropdownMenu(
+    expanded: Boolean,
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onMembers: () -> Unit,
+    onRename: () -> Unit,
+    onCopy: () -> Unit,
+    onClear: () -> Unit,
+    onDelete: () -> Unit,
+    onShareByEmail: () -> Unit,
+    onInvite: () -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text("Участники") },
+            leadingIcon = { Icon(Icons.Default.People, contentDescription = null) },
+            enabled = enabled,
+            onClick = onMembers
+        )
+        DropdownMenuItem(
+            text = { Text("Переименовать") },
+            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+            enabled = enabled,
+            onClick = onRename
+        )
+        DropdownMenuItem(
+            text = { Text("Скопировать") },
+            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+            enabled = enabled,
+            onClick = onCopy
+        )
+        DropdownMenuItem(
+            text = { Text("Очистить") },
+            leadingIcon = { Icon(Icons.Default.CleaningServices, contentDescription = null) },
+            enabled = enabled,
+            onClick = onClear
+        )
+        DropdownMenuItem(
+            text = { Text("Удалить") },
+            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            enabled = enabled,
+            onClick = onDelete
+        )
+        DropdownMenuItem(
+            text = { Text("Открыть по email") },
+            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+            enabled = enabled,
+            onClick = onShareByEmail
+        )
+        DropdownMenuItem(
+            text = { Text("Ссылка-приглашение") },
+            leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+            enabled = enabled,
+            onClick = onInvite
+        )
+    }
+}
+
+@Composable
+private fun CreateListDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Новый список") },
+        text = {
+            OutlinedTextField(
+                name,
+                { name = it },
+                label = { Text("Название списка") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            Button(onClick = { if (name.isNotBlank()) onCreate(name.trim()) }) {
+                Text("Создать")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@Composable
+private fun SelectListDialog(
+    lists: List<com.shoppinglist.mobile.data.ShoppingListDto>,
+    selectedListId: Int?,
+    onDismiss: () -> Unit,
+    onSelect: (Int) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Выбрать список") },
+        text = {
+            LazyColumn(modifier = Modifier.height(320.dp)) {
+                items(lists) { list ->
+                    FilterChip(
+                        selected = list.id == selectedListId,
+                        onClick = { onSelect(list.id) },
+                        label = { Text(list.name) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
 }
 
 @Composable
@@ -617,9 +729,24 @@ private fun ConfirmDeleteDialog(listName: String, onDismiss: () -> Unit, onDelet
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Удалить список?") },
-        text = { Text("Список «$listName» будет удален для всех участников.") },
+        text = { Text("Если вы владелец, список будет удален для всех. Если нет, список будет скрыт только у вас.") },
         confirmButton = {
             Button(onClick = onDelete) { Text("Удалить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmClearDialog(listName: String, onDismiss: () -> Unit, onClear: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Очистить список?") },
+        text = { Text("Все позиции из списка «$listName» будут удалены.") },
+        confirmButton = {
+            Button(onClick = onClear) { Text("Очистить") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }

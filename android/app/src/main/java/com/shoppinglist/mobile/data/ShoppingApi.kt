@@ -31,6 +31,9 @@ interface ShoppingApi {
     @DELETE("lists/{listId}")
     suspend fun deleteList(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
 
+    @DELETE("lists/{listId}/items")
+    suspend fun clearList(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
+
     @POST("lists/{listId}/copy")
     suspend fun copyList(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
 

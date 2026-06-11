@@ -1,5 +1,6 @@
 import secrets
 from html import escape
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
@@ -28,8 +29,9 @@ from .setup import get_server_settings, router as setup_router
 Base.metadata.create_all(bind=engine)
 with engine.begin() as connection:
     connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+    connection.execute(text("ALTER TABLE list_invites ADD COLUMN IF NOT EXISTS used_at TIMESTAMP"))
 
-app = FastAPI(title="API синхронизации списка покупок", version="0.1.0")
+app = FastAPI(title="API синхронизации списка покупок", version="0.2.0-pre.1")
 app.include_router(setup_router)
 
 
@@ -131,10 +133,27 @@ def update_list(
 
 @app.delete("/lists/{list_id}")
 def delete_list(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    shopping_list = require_list_owner(db, current_user, list_id)
-    db.delete(shopping_list)
+    shopping_list = require_list_access(db, current_user, list_id)
+    if shopping_list.owner_id == current_user.id:
+        db.delete(shopping_list)
+    else:
+        membership = db.scalar(
+            select(ListMember).where(ListMember.list_id == shopping_list.id, ListMember.user_id == current_user.id)
+        )
+        if membership is not None:
+            db.delete(membership)
     db.commit()
     return {"status": "deleted"}
+
+
+@app.delete("/lists/{list_id}/items")
+def clear_list(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_access(db, current_user, list_id)
+    items = db.scalars(select(ShoppingItem).where(ShoppingItem.list_id == shopping_list.id)).all()
+    for item in items:
+        db.delete(item)
+    db.commit()
+    return {"status": "cleared"}
 
 
 @app.post("/lists/{list_id}/copy")
@@ -194,16 +213,14 @@ def share_list(
 @app.post("/lists/{list_id}/invite", response_model=InviteResponse)
 def create_invite(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     shopping_list = require_list_access(db, current_user, list_id)
-    invite = db.scalar(select(ListInvite).where(ListInvite.list_id == shopping_list.id))
-    if invite is None:
-        invite = ListInvite(
-            token=secrets.token_urlsafe(24),
-            list_id=shopping_list.id,
-            created_by_id=current_user.id,
-        )
-        db.add(invite)
-        db.commit()
-        db.refresh(invite)
+    invite = ListInvite(
+        token=secrets.token_urlsafe(24),
+        list_id=shopping_list.id,
+        created_by_id=current_user.id,
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
 
     external_url = get_server_settings(db).external_url.rstrip("/")
     web_url = f"{external_url}/join/{invite.token}" if external_url else f"/join/{invite.token}"
@@ -213,9 +230,10 @@ def create_invite(list_id: int, current_user: User = Depends(get_current_user), 
 @app.post("/invites/{token}/accept")
 def accept_invite(token: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
-    if invite is None:
+    if invite is None or invite.used_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
     add_member_if_missing(db, invite.list_id, current_user.id)
+    invite.used_at = datetime.utcnow()
     db.commit()
     return {"status": "joined", "list_id": invite.list_id}
 
@@ -223,7 +241,7 @@ def accept_invite(token: str, current_user: User = Depends(get_current_user), db
 @app.get("/join/{token}", response_class=HTMLResponse)
 def join_page(token: str, db: Session = Depends(get_db)):
     invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
-    if invite is None:
+    if invite is None or invite.used_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
     shopping_list = db.get(ShoppingList, invite.list_id)
     app_url = f"shoppinglist://join/{escape(token)}"

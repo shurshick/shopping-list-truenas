@@ -186,6 +186,23 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun clearSelectedList() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            api().clearList("Bearer $token", listId)
+            sync()
+        }
+    }
+
+    fun deleteItem(itemId: Int) = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        runRequest {
+            api().deleteItem("Bearer $token", itemId)
+            sync()
+        }
+    }
+
     fun createInviteLink() = viewModelScope.launch {
         val token = _state.value.token ?: return@launch
         val listId = _state.value.selectedListId ?: return@launch
