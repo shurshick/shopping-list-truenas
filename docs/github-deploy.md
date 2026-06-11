@@ -20,6 +20,7 @@ curl -L \
 POSTGRES_PASSWORD=long-random-password
 JWT_SECRET=another-long-random-secret
 API_PORT=8000
+INVITE_TOKEN_HOURS=168
 ```
 
 Запустите:
@@ -73,3 +74,5 @@ docker compose up -d
 git pull
 docker compose up -d --build
 ```
+
+При запуске контейнер API автоматически применяет миграции базы данных. Отдельно запускать SQL-команды или Alembic на сервере не нужно.

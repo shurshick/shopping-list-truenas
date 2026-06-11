@@ -37,6 +37,9 @@ interface ShoppingApi {
     @DELETE("lists/{listId}/items/checked")
     suspend fun clearCheckedItems(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
 
+    @PATCH("lists/{listId}/items/checked")
+    suspend fun restoreCheckedItems(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
+
     @POST("lists/{listId}/copy")
     suspend fun copyList(@Header("Authorization") authorization: String, @Path("listId") listId: Int)
 
@@ -51,7 +54,7 @@ interface ShoppingApi {
         @Header("Authorization") authorization: String,
         @Path("listId") listId: Int,
         @Body request: ItemCreate
-    )
+    ): ShoppingItemDto
 
     @POST("lists/{listId}/share")
     suspend fun shareList(

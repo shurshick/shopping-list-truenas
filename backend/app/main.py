@@ -1,13 +1,14 @@
 import secrets
 from html import escape
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .database import Base, engine, get_db
+from .config import settings
+from .database import get_db
 from .models import ListInvite, ListMember, ShoppingItem, ShoppingList, User
 from .schemas import (
     AuthRequest,
@@ -26,12 +27,7 @@ from .security import create_access_token, get_current_user, hash_password, veri
 from .setup import get_server_settings, router as setup_router
 
 
-Base.metadata.create_all(bind=engine)
-with engine.begin() as connection:
-    connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
-    connection.execute(text("ALTER TABLE list_invites ADD COLUMN IF NOT EXISTS used_at TIMESTAMP"))
-
-app = FastAPI(title="API синхронизации списка покупок", version="1.1.0")
+app = FastAPI(title="API синхронизации списка покупок", version="1.2.0")
 app.include_router(setup_router)
 
 
@@ -71,6 +67,10 @@ def add_member_if_missing(db: Session, list_id: int, user_id: int) -> None:
     exists = db.scalar(select(ListMember.id).where(ListMember.list_id == list_id, ListMember.user_id == user_id))
     if exists is None:
         db.add(ListMember(list_id=list_id, user_id=user_id))
+
+
+def invite_is_expired(invite: ListInvite) -> bool:
+    return invite.expires_at is not None and invite.expires_at < datetime.utcnow()
 
 
 @app.get("/health")
@@ -184,6 +184,18 @@ def clear_checked_items(list_id: int, current_user: User = Depends(get_current_u
     return {"status": "cleared"}
 
 
+@app.patch("/lists/{list_id}/items/checked")
+def restore_checked_items(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_access(db, current_user, list_id)
+    items = db.scalars(
+        select(ShoppingItem).where(ShoppingItem.list_id == shopping_list.id, ShoppingItem.is_checked.is_(True))
+    ).all()
+    for item in items:
+        item.is_checked = False
+    db.commit()
+    return {"status": "restored", "count": len(items)}
+
+
 @app.post("/lists/{list_id}/copy")
 def copy_list(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     source = require_list_access(db, current_user, list_id)
@@ -245,6 +257,7 @@ def create_invite(list_id: int, current_user: User = Depends(get_current_user), 
         token=secrets.token_urlsafe(24),
         list_id=shopping_list.id,
         created_by_id=current_user.id,
+        expires_at=datetime.utcnow() + timedelta(hours=settings.invite_token_hours),
     )
     db.add(invite)
     db.commit()
@@ -252,13 +265,13 @@ def create_invite(list_id: int, current_user: User = Depends(get_current_user), 
 
     external_url = get_server_settings(db).external_url.rstrip("/")
     web_url = f"{external_url}/join/{invite.token}" if external_url else f"/join/{invite.token}"
-    return {"token": invite.token, "url": web_url, "app_url": f"shoppinglist://join/{invite.token}"}
+    return {"token": invite.token, "url": web_url, "app_url": f"shoppinglist://join/{invite.token}", "expires_at": invite.expires_at}
 
 
 @app.post("/invites/{token}/accept")
 def accept_invite(token: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
-    if invite is None or invite.used_at is not None:
+    if invite is None or invite.used_at is not None or invite_is_expired(invite):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
     add_member_if_missing(db, invite.list_id, current_user.id)
     invite.used_at = datetime.utcnow()
@@ -269,7 +282,7 @@ def accept_invite(token: str, current_user: User = Depends(get_current_user), db
 @app.get("/join/{token}", response_class=HTMLResponse)
 def join_page(token: str, db: Session = Depends(get_db)):
     invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
-    if invite is None or invite.used_at is not None:
+    if invite is None or invite.used_at is not None or invite_is_expired(invite):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
     shopping_list = db.get(ShoppingList, invite.list_id)
     app_url = f"shoppinglist://join/{escape(token)}"

@@ -60,6 +60,7 @@ class InviteResponse(BaseModel):
     token: str
     url: str
     app_url: str
+    expires_at: datetime | None = None
 
 
 class SyncItem(BaseModel):

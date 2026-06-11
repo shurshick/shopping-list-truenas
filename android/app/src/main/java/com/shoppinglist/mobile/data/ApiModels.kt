@@ -8,7 +8,7 @@ data class ListUpdate(val name: String)
 data class ItemCreate(val name: String, val quantity: String = "")
 data class ItemUpdate(val name: String? = null, val quantity: String? = null, val is_checked: Boolean? = null)
 data class ShareRequest(val email: String)
-data class InviteResponse(val token: String, val url: String, val app_url: String)
+data class InviteResponse(val token: String, val url: String, val app_url: String, val expires_at: String? = null)
 data class MembersResponse(val members: List<ListMemberDto>)
 data class ListMemberDto(val id: Int, val email: String, val is_owner: Boolean)
 

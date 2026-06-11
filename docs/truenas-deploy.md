@@ -17,6 +17,7 @@
 POSTGRES_PASSWORD=long-random-password
 JWT_SECRET=another-long-random-secret
 API_PORT=8000
+INVITE_TOKEN_HOURS=168
 ```
 
 Запуск:
@@ -24,6 +25,8 @@ API_PORT=8000
 ```bash
 docker compose up -d --build
 ```
+
+Контейнер API автоматически применяет миграции базы данных перед запуском приложения.
 
 Проверка на любом сервере:
 

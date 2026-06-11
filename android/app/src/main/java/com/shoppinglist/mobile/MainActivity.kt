@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -121,7 +122,9 @@ class MainActivity : ComponentActivity() {
                             viewModel::deleteSelectedList,
                             viewModel::clearSelectedList,
                             viewModel::clearPurchasedItems,
+                            viewModel::restorePurchasedItems,
                             viewModel::updateItem,
+                            viewModel::undoDeleteItem,
                             viewModel::createInviteLink,
                             viewModel::clearInviteUrl,
                             viewModel::addCatalogProduct,
@@ -218,7 +221,9 @@ private fun ShoppingScreen(
     onDeleteList: () -> Unit,
     onClearList: () -> Unit,
     onClearPurchased: () -> Unit,
+    onRestorePurchased: () -> Unit,
     onUpdateItem: (Int, String, String) -> Unit,
+    onUndoDeleteItem: () -> Unit,
     onCreateInviteLink: () -> Unit,
     onClearInviteUrl: () -> Unit,
     onAddCatalogProduct: (String) -> Unit,
@@ -306,6 +311,10 @@ private fun ShoppingScreen(
                             listMenuOpen = false
                             clearPurchasedDialogOpen = true
                         },
+                        onRestorePurchased = {
+                            listMenuOpen = false
+                            onRestorePurchased()
+                        },
                         onDelete = {
                             listMenuOpen = false
                             deleteDialogOpen = true
@@ -389,6 +398,12 @@ private fun ShoppingScreen(
                     )
                 }
 
+                if (state.canUndoDelete) {
+                    item {
+                        DeletedItemUndoCard(onUndo = onUndoDeleteItem)
+                    }
+                }
+
                 if (activeItems.isNotEmpty()) {
                     item { ListSectionHeader("Купить") }
                     items(activeItems) { item ->
@@ -426,6 +441,15 @@ private fun ShoppingScreen(
             state.message?.let {
                 item {
                     Text(it, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (state.pendingOperationCount > 0) {
+                item {
+                    Text(
+                        "Ожидает синхронизации: ${state.pendingOperationCount}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium
+                    )
                 }
             }
         }
@@ -578,6 +602,29 @@ private fun ListSectionHeader(title: String) {
 }
 
 @Composable
+private fun DeletedItemUndoCard(onUndo: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Text(
+                "Товар удалён",
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onUndo) {
+                Icon(Icons.Default.Undo, contentDescription = null)
+                Text("Отменить", modifier = Modifier.padding(start = 6.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun ShoppingItemRow(
     item: com.shoppinglist.mobile.data.ShoppingItemDto,
     onToggleItem: (Int, Boolean) -> Unit,
@@ -689,6 +736,7 @@ private fun ListDropdownMenu(
     onCopy: () -> Unit,
     onClear: () -> Unit,
     onClearPurchased: () -> Unit,
+    onRestorePurchased: () -> Unit,
     onDelete: () -> Unit,
     onShareByEmail: () -> Unit,
     onInvite: () -> Unit
@@ -723,6 +771,12 @@ private fun ListDropdownMenu(
             leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null) },
             enabled = enabled,
             onClick = onClearPurchased
+        )
+        DropdownMenuItem(
+            text = { Text("Вернуть купленные") },
+            leadingIcon = { Icon(Icons.Default.Undo, contentDescription = null) },
+            enabled = enabled,
+            onClick = onRestorePurchased
         )
         DropdownMenuItem(
             text = { Text("Удалить") },

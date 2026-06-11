@@ -31,6 +31,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://shopping:shopping-list-postgres-password-change-me@postgres:5432/shopping
       JWT_SECRET: shopping-list-jwt-secret-change-me-before-real-use
+      INVITE_TOKEN_HOURS: 168
     ports:
       - "8000:8000"
 
