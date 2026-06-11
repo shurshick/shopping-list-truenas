@@ -73,6 +73,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +84,12 @@ import androidx.compose.ui.unit.dp
 import com.shoppinglist.mobile.BuildConfig
 import com.shoppinglist.mobile.ui.ShoppingUiState
 import com.shoppinglist.mobile.ui.ShoppingViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : ComponentActivity() {
     private val viewModel: ShoppingViewModel by viewModels()
@@ -1323,7 +1330,11 @@ private fun SettingsDialog(
 @Composable
 private fun AboutDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val projectUrl = "https://github.com/shurshick/shopping-list"
+    var updateStatus by remember { mutableStateOf("") }
+    var updateUrl by remember { mutableStateOf<String?>(null) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("О приложении") },
@@ -1339,6 +1350,42 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     readOnly = true
                 )
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            isCheckingUpdate = true
+                            updateStatus = "Проверяем обновление..."
+                            updateUrl = null
+                            val result = checkLatestRelease()
+                            isCheckingUpdate = false
+                            if (result == null) {
+                                updateStatus = "Не удалось проверить обновление."
+                            } else if (isVersionNewer(result.version, BuildConfig.VERSION_NAME)) {
+                                updateStatus = "Доступна новая версия ${result.version}."
+                                updateUrl = result.apkUrl
+                            } else {
+                                updateStatus = "Установлена актуальная версия."
+                            }
+                        }
+                    },
+                    enabled = !isCheckingUpdate,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isCheckingUpdate) "Проверка..." else "Проверить обновление")
+                }
+                if (updateStatus.isNotBlank()) {
+                    Text(updateStatus, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                updateUrl?.let { apkUrl ->
+                    Button(
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Скачать обновление")
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1354,6 +1401,47 @@ private fun AboutDialog(onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("Закрыть") }
         }
     )
+}
+
+private data class ReleaseUpdateInfo(val version: String, val apkUrl: String)
+
+private suspend fun checkLatestRelease(): ReleaseUpdateInfo? = withContext(Dispatchers.IO) {
+    runCatching {
+        val connection = (URL("https://api.github.com/repos/shurshick/shopping-list/releases/latest").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 10000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "shopping-list-android/${BuildConfig.VERSION_NAME}")
+        }
+        connection.inputStream.bufferedReader().use { reader ->
+            val json = JSONObject(reader.readText())
+            val version = json.getString("tag_name").removePrefix("v")
+            val assets = json.getJSONArray("assets")
+            var apkUrl = ""
+            for (index in 0 until assets.length()) {
+                val asset = assets.getJSONObject(index)
+                val name = asset.optString("name")
+                if (name.endsWith(".apk")) {
+                    apkUrl = asset.getString("browser_download_url")
+                    break
+                }
+            }
+            if (apkUrl.isBlank()) null else ReleaseUpdateInfo(version, apkUrl)
+        }
+    }.getOrNull()
+}
+
+private fun isVersionNewer(latest: String, current: String): Boolean {
+    val latestParts = latest.split(".", "-").mapNotNull { it.toIntOrNull() }
+    val currentParts = current.split(".", "-").mapNotNull { it.toIntOrNull() }
+    val maxSize = maxOf(latestParts.size, currentParts.size)
+    for (index in 0 until maxSize) {
+        val latestPart = latestParts.getOrElse(index) { 0 }
+        val currentPart = currentParts.getOrElse(index) { 0 }
+        if (latestPart != currentPart) return latestPart > currentPart
+    }
+    return false
 }
 
 @Composable
