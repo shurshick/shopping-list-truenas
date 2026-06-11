@@ -89,6 +89,7 @@ class AdminStatusResponse(BaseModel):
     lists_count: int
     items_count: int
     checked_items_count: int
+    activity_events_count: int
     invites_active_count: int
     pending_invites_count: int
     invite_token_hours: int

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
@@ -31,7 +31,7 @@ from .security import create_access_token, get_current_user, hash_password, veri
 from .setup import get_server_settings, router as setup_router
 
 
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 
 app = FastAPI(title="API синхронизации списка покупок", version=APP_VERSION)
 app.include_router(setup_router)
@@ -127,6 +127,7 @@ def render_admin_page() -> str:
             <div class="grid" id="status-grid"></div>
             <div class="actions">
               <button type="button" id="refresh">Обновить</button>
+              <button type="button" class="secondary" id="clear-activity">Очистить историю</button>
               <a href="/docs"><button type="button" class="secondary">Открыть Swagger</button></a>
               <a href="/setup"><button type="button" class="secondary">Настройки сервера</button></a>
             </div>
@@ -140,6 +141,7 @@ def render_admin_page() -> str:
           const statusSection = document.querySelector("#status-section");
           const statusGrid = document.querySelector("#status-grid");
           const refreshButton = document.querySelector("#refresh");
+          const clearActivityButton = document.querySelector("#clear-activity");
           const clearTokenButton = document.querySelector("#clear-token");
 
           function showMessage(text, kind) {{
@@ -169,6 +171,7 @@ def render_admin_page() -> str:
               card("Списки", data.lists_count),
               card("Товары", data.items_count),
               card("Куплено", data.checked_items_count),
+              card("События истории", data.activity_events_count),
               card("Активные приглашения", data.invites_active_count),
               card("Ожидающие приглашения", data.pending_invites_count),
               card("Срок приглашения", `${{data.invite_token_hours}} ч.`, true),
@@ -224,6 +227,27 @@ def render_admin_page() -> str:
           }});
 
           refreshButton.addEventListener("click", loadStatus);
+          clearActivityButton.addEventListener("click", async () => {{
+            const token = localStorage.getItem(tokenKey);
+            if (!token) {{
+              showMessage("Нужно войти под администратором.", "error");
+              return;
+            }}
+            if (!confirm("Очистить всю историю действий? Списки и товары останутся без изменений.")) {{
+              return;
+            }}
+            const response = await fetch("/admin/activity", {{
+              method: "DELETE",
+              headers: {{ Authorization: `Bearer ${{token}}` }},
+            }});
+            if (!response.ok) {{
+              showMessage("Не удалось очистить историю.", "error");
+              return;
+            }}
+            const data = await response.json();
+            showMessage(`История очищена. Удалено событий: ${{data.deleted}}.`, "ok");
+            await loadStatus();
+          }});
           clearTokenButton.addEventListener("click", () => {{
             localStorage.removeItem(tokenKey);
             statusSection.classList.add("hidden");
@@ -341,6 +365,7 @@ def admin_status(current_user: User = Depends(get_current_user), db: Session = D
         "lists_count": db.scalar(select(func.count(ShoppingList.id))) or 0,
         "items_count": db.scalar(select(func.count(ShoppingItem.id))) or 0,
         "checked_items_count": db.scalar(select(func.count(ShoppingItem.id)).where(ShoppingItem.is_checked.is_(True))) or 0,
+        "activity_events_count": db.scalar(select(func.count(ActivityLog.id))) or 0,
         "invites_active_count": db.scalar(
             select(func.count(ListInvite.id)).where(ListInvite.used_at.is_(None), (ListInvite.expires_at.is_(None)) | (ListInvite.expires_at >= now))
         ) or 0,
@@ -351,6 +376,14 @@ def admin_status(current_user: User = Depends(get_current_user), db: Session = D
         "allow_registration": server_settings.allow_registration,
         "setup_completed": server_settings.setup_completed,
     }
+
+
+@app.delete("/admin/activity")
+def clear_activity(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_admin(current_user)
+    result = db.execute(delete(ActivityLog))
+    db.commit()
+    return {"deleted": result.rowcount or 0}
 
 
 @app.get("/server-config", response_model=PublicServerConfig)
