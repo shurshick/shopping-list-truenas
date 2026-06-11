@@ -500,7 +500,7 @@ private fun ItemCreateCard(
                     label = { Text("Товар") },
                     modifier = Modifier
                         .weight(1f)
-                        .height(56.dp),
+                        .height(64.dp),
                     singleLine = true
                 )
                 OutlinedTextField(
@@ -509,7 +509,7 @@ private fun ItemCreateCard(
                     label = { Text("Кол-во") },
                     modifier = Modifier
                         .weight(0.65f)
-                        .height(56.dp),
+                        .height(64.dp),
                     singleLine = true
                 )
                 IconButton(onClick = onAdd, modifier = Modifier.size(40.dp)) {
