@@ -309,7 +309,7 @@ private fun ShoppingScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             if (selectedList != null) {
                 item {
@@ -336,7 +336,7 @@ private fun ShoppingScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                                .padding(horizontal = 12.dp, vertical = 0.dp)
                         ) {
                             Checkbox(
                                 checked = item.is_checked,
@@ -497,19 +497,19 @@ private fun ItemCreateCard(
                 OutlinedTextField(
                     itemName,
                     onItemName,
-                    label = { Text("Товар") },
+                    placeholder = { Text("Товар") },
                     modifier = Modifier
                         .weight(1f)
-                        .height(64.dp),
+                        .height(56.dp),
                     singleLine = true
                 )
                 OutlinedTextField(
                     quantity,
                     onQuantity,
-                    label = { Text("Кол-во") },
+                    placeholder = { Text("Кол-во") },
                     modifier = Modifier
                         .weight(0.65f)
-                        .height(64.dp),
+                        .height(56.dp),
                     singleLine = true
                 )
                 IconButton(onClick = onAdd, modifier = Modifier.size(40.dp)) {
