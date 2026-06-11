@@ -40,7 +40,7 @@
 
 ## Файлы релиза
 
-- `shopping-list-android-v0.2.0-debug.apk` - Android-приложение для установки на телефон.
+- `shopping-list-android-v0.2.0.apk` - Android-приложение для установки на телефон.
 - `shopping-list-server-v0.2.0.zip` - серверная часть, Docker Compose-файлы и инструкции.
 - `shopping-list-source-v0.2.0.zip` - полный архив исходного кода.
 
