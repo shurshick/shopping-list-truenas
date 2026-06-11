@@ -28,6 +28,7 @@ data class ShoppingUiState(
     val inviteUrl: String = "",
     val pendingInviteToken: String? = null,
     val productCatalog: List<String> = emptyList(),
+    val themeMode: String = "system",
     val selectedListId: Int? = null,
     val message: String? = null,
     val isLoading: Boolean = false
@@ -62,7 +63,8 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         ShoppingUiState(
             token = preferences.getString("token", null),
             serverUrl = preferences.getString("serverUrl", "") ?: "",
-            productCatalog = loadProductCatalog()
+            productCatalog = loadProductCatalog(),
+            themeMode = preferences.getString("themeMode", "system") ?: "system"
         )
     )
     val state: StateFlow<ShoppingUiState> = _state.asStateFlow()
@@ -262,6 +264,12 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         val trimmedUrl = serverUrl.trim()
         preferences.edit().putString("serverUrl", trimmedUrl).apply()
         update { copy(serverUrl = trimmedUrl, message = "Адрес сервера сохранен") }
+    }
+
+    fun saveThemeMode(themeMode: String) {
+        val safeThemeMode = if (themeMode in listOf("system", "light", "dark")) themeMode else "system"
+        preferences.edit().putString("themeMode", safeThemeMode).apply()
+        update { copy(themeMode = safeThemeMode) }
     }
 
     fun logout() {

@@ -9,6 +9,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -54,6 +55,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -86,9 +89,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleInviteIntent(intent)
         setContent {
-            MaterialTheme {
+            val state by viewModel.state.collectAsState()
+            val useDarkTheme = when (state.themeMode) {
+                "dark" -> true
+                "light" -> false
+                else -> isSystemInDarkTheme()
+            }
+            MaterialTheme(colorScheme = if (useDarkTheme) darkColorScheme() else lightColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    val state by viewModel.state.collectAsState()
                     if (state.token == null) {
                         LoginScreen(
                             state,
@@ -119,6 +127,7 @@ class MainActivity : ComponentActivity() {
                             viewModel::addCatalogProduct,
                             viewModel::removeCatalogProduct,
                             viewModel::saveServerUrl,
+                            viewModel::saveThemeMode,
                             viewModel::logout
                         )
                     }
@@ -215,6 +224,7 @@ private fun ShoppingScreen(
     onAddCatalogProduct: (String) -> Unit,
     onRemoveCatalogProduct: (String) -> Unit,
     onSaveServerUrl: (String) -> Unit,
+    onSaveThemeMode: (String) -> Unit,
     onLogout: () -> Unit
 ) {
     var itemName by remember { mutableStateOf("") }
@@ -244,6 +254,8 @@ private fun ShoppingScreen(
             }
         }
     }
+    val activeItems = remember(visibleItems) { visibleItems.filterNot { it.is_checked } }
+    val purchasedItems = remember(visibleItems) { visibleItems.filter { it.is_checked } }
 
     Scaffold(
         topBar = {
@@ -377,39 +389,27 @@ private fun ShoppingScreen(
                     )
                 }
 
-                items(visibleItems) { item ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 0.dp)
-                        ) {
-                            Checkbox(
-                                checked = item.is_checked,
-                                onCheckedChange = { checked -> onToggleItem(item.id, checked) },
-                                modifier = Modifier.size(40.dp)
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    textDecoration = if (item.is_checked) TextDecoration.LineThrough else TextDecoration.None,
-                                    modifier = Modifier.clickable { editingItem = item }
-                                )
-                                if (item.quantity.isNotBlank()) {
-                                    Text(
-                                        item.quantity,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.clickable { editingItem = item }
-                                    )
-                                }
-                            }
-                            IconButton(onClick = { onDeleteItem(item.id) }, modifier = Modifier.size(40.dp)) {
-                                Icon(Icons.Default.Delete, contentDescription = "Удалить товар")
-                            }
-                        }
+                if (activeItems.isNotEmpty()) {
+                    item { ListSectionHeader("Купить") }
+                    items(activeItems) { item ->
+                        ShoppingItemRow(
+                            item = item,
+                            onToggleItem = onToggleItem,
+                            onDeleteItem = onDeleteItem,
+                            onEditItem = { editingItem = it }
+                        )
+                    }
+                }
+
+                if (purchasedItems.isNotEmpty()) {
+                    item { ListSectionHeader("Куплено") }
+                    items(purchasedItems) { item ->
+                        ShoppingItemRow(
+                            item = item,
+                            onToggleItem = onToggleItem,
+                            onDeleteItem = onDeleteItem,
+                            onEditItem = { editingItem = it }
+                        )
                     }
                 }
             } else {
@@ -539,11 +539,13 @@ private fun ShoppingScreen(
     if (settingsDialogOpen) {
         SettingsDialog(
             serverUrl = state.serverUrl,
+            themeMode = state.themeMode,
             onDismiss = { settingsDialogOpen = false },
             onSaveServerUrl = {
                 onSaveServerUrl(it)
                 settingsDialogOpen = false
             },
+            onSaveThemeMode = onSaveThemeMode,
             onLogout = {
                 onLogout()
                 settingsDialogOpen = false
@@ -562,6 +564,58 @@ private fun ShoppingScreen(
             onAdd = onAddCatalogProduct,
             onRemove = onRemoveCatalogProduct
         )
+    }
+}
+
+@Composable
+private fun ListSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun ShoppingItemRow(
+    item: com.shoppinglist.mobile.data.ShoppingItemDto,
+    onToggleItem: (Int, Boolean) -> Unit,
+    onDeleteItem: (Int) -> Unit,
+    onEditItem: (com.shoppinglist.mobile.data.ShoppingItemDto) -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 0.dp)
+        ) {
+            Checkbox(
+                checked = item.is_checked,
+                onCheckedChange = { checked -> onToggleItem(item.id, checked) },
+                modifier = Modifier.size(40.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    textDecoration = if (item.is_checked) TextDecoration.LineThrough else TextDecoration.None,
+                    modifier = Modifier.clickable { onEditItem(item) }
+                )
+                if (item.quantity.isNotBlank()) {
+                    Text(
+                        item.quantity,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { onEditItem(item) }
+                    )
+                }
+            }
+            IconButton(onClick = { onDeleteItem(item.id) }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Delete, contentDescription = "Удалить товар")
+            }
+        }
     }
 }
 
@@ -973,8 +1027,10 @@ private fun InviteLinkDialog(inviteUrl: String, onDismiss: () -> Unit) {
 @Composable
 private fun SettingsDialog(
     serverUrl: String,
+    themeMode: String,
     onDismiss: () -> Unit,
     onSaveServerUrl: (String) -> Unit,
+    onSaveThemeMode: (String) -> Unit,
     onLogout: () -> Unit
 ) {
     var nextServerUrl by remember(serverUrl) { mutableStateOf(serverUrl) }
@@ -991,6 +1047,30 @@ private fun SettingsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+                Text("Тема", style = MaterialTheme.typography.titleSmall)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    item {
+                        FilterChip(
+                            selected = themeMode == "system",
+                            onClick = { onSaveThemeMode("system") },
+                            label = { Text("Как в системе") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = themeMode == "light",
+                            onClick = { onSaveThemeMode("light") },
+                            label = { Text("Светлая") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = themeMode == "dark",
+                            onClick = { onSaveThemeMode("dark") },
+                            label = { Text("Тёмная") }
+                        )
+                    }
+                }
                 HorizontalDivider()
                 OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Logout, contentDescription = null)
