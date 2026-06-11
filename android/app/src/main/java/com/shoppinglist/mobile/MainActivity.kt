@@ -217,6 +217,15 @@ private fun ShoppingScreen(
     var inviteDialogOpen by remember { mutableStateOf(false) }
     var catalogDialogOpen by remember { mutableStateOf(false) }
     val selectedList = state.lists.firstOrNull { it.id == state.selectedListId }
+    val visibleItems = remember(selectedList?.items) {
+        selectedList?.items.orEmpty().sortedWith { first, second ->
+            when {
+                first.is_checked != second.is_checked -> if (first.is_checked) 1 else -1
+                first.is_checked -> first.updated_at.compareTo(second.updated_at)
+                else -> second.updated_at.compareTo(first.updated_at)
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -328,16 +337,6 @@ private fun ShoppingScreen(
                             }
                         }
                     )
-                }
-
-                val visibleItems = remember(selectedList.items) {
-                    selectedList.items.sortedWith { first, second ->
-                        when {
-                            first.is_checked != second.is_checked -> if (first.is_checked) 1 else -1
-                            first.is_checked -> first.updated_at.compareTo(second.updated_at)
-                            else -> second.updated_at.compareTo(first.updated_at)
-                        }
-                    }
                 }
 
                 items(visibleItems) { item ->
