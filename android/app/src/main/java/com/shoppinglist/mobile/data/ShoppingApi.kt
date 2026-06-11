@@ -55,6 +55,12 @@ interface ShoppingApi {
         @Path("listId") listId: Int
     ): ActivityResponse
 
+    @DELETE("lists/{listId}/activity")
+    suspend fun clearListActivity(
+        @Header("Authorization") authorization: String,
+        @Path("listId") listId: Int
+    )
+
     @POST("lists/{listId}/items")
     suspend fun createItem(
         @Header("Authorization") authorization: String,

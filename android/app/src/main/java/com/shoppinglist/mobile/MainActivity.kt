@@ -119,6 +119,7 @@ class MainActivity : ComponentActivity() {
                             viewModel::shareList,
                             viewModel::loadMembers,
                             viewModel::loadActivity,
+                            viewModel::clearListActivity,
                             viewModel::renameSelectedList,
                             viewModel::copySelectedList,
                             viewModel::deleteSelectedList,
@@ -219,6 +220,7 @@ private fun ShoppingScreen(
     onShareList: (String) -> Unit,
     onLoadMembers: () -> Unit,
     onLoadActivity: () -> Unit,
+    onClearActivity: () -> Unit,
     onRenameList: (String) -> Unit,
     onCopyList: () -> Unit,
     onDeleteList: () -> Unit,
@@ -244,6 +246,7 @@ private fun ShoppingScreen(
     var shareDialogOpen by remember { mutableStateOf(false) }
     var membersDialogOpen by remember { mutableStateOf(false) }
     var activityDialogOpen by remember { mutableStateOf(false) }
+    var clearActivityDialogOpen by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var deleteDialogOpen by remember { mutableStateOf(false) }
     var clearDialogOpen by remember { mutableStateOf(false) }
@@ -303,6 +306,10 @@ private fun ShoppingScreen(
                             listMenuOpen = false
                             onLoadActivity()
                             activityDialogOpen = true
+                        },
+                        onClearActivity = {
+                            listMenuOpen = false
+                            clearActivityDialogOpen = true
                         },
                         onRename = {
                             listMenuOpen = false
@@ -556,6 +563,17 @@ private fun ShoppingScreen(
         )
     }
 
+    if (clearActivityDialogOpen && selectedList != null) {
+        ConfirmClearActivityDialog(
+            listName = selectedList.name,
+            onDismiss = { clearActivityDialogOpen = false },
+            onClear = {
+                onClearActivity()
+                clearActivityDialogOpen = false
+            }
+        )
+    }
+
     editingItem?.let { item ->
         EditItemDialog(
             itemName = item.name,
@@ -794,6 +812,7 @@ private fun ListDropdownMenu(
     onDismiss: () -> Unit,
     onMembers: () -> Unit,
     onActivity: () -> Unit,
+    onClearActivity: () -> Unit,
     onRename: () -> Unit,
     onCopy: () -> Unit,
     onClear: () -> Unit,
@@ -815,6 +834,12 @@ private fun ListDropdownMenu(
             leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
             enabled = enabled,
             onClick = onActivity
+        )
+        DropdownMenuItem(
+            text = { Text("Очистить историю") },
+            leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+            enabled = enabled,
+            onClick = onClearActivity
         )
         DropdownMenuItem(
             text = { Text("Переименовать") },
@@ -1114,6 +1139,21 @@ private fun ConfirmClearPurchasedDialog(listName: String, onDismiss: () -> Unit,
         onDismissRequest = onDismiss,
         title = { Text("Очистить купленные?") },
         text = { Text("Все отмеченные как купленные позиции из списка «$listName» будут удалены.") },
+        confirmButton = {
+            Button(onClick = onClear) { Text("Очистить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmClearActivityDialog(listName: String, onDismiss: () -> Unit, onClear: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Очистить историю?") },
+        text = { Text("История действий списка «$listName» будет удалена. Сами товары и список останутся без изменений.") },
         confirmButton = {
             Button(onClick = onClear) { Text("Очистить") }
         },

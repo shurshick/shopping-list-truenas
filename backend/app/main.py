@@ -31,7 +31,7 @@ from .security import create_access_token, get_current_user, hash_password, veri
 from .setup import get_server_settings, router as setup_router
 
 
-APP_VERSION = "1.3.3"
+APP_VERSION = "1.3.4"
 
 app = FastAPI(title="API синхронизации списка покупок", version=APP_VERSION)
 app.include_router(setup_router)
@@ -577,6 +577,14 @@ def list_activity(list_id: int, current_user: User = Depends(get_current_user), 
             for event, email in rows
         ]
     }
+
+
+@app.delete("/lists/{list_id}/activity")
+def clear_list_activity(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_access(db, current_user, list_id)
+    result = db.execute(delete(ActivityLog).where(ActivityLog.list_id == shopping_list.id))
+    db.commit()
+    return {"deleted": result.rowcount or 0}
 
 
 @app.post("/lists/{list_id}/share")

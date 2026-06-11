@@ -218,6 +218,15 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun clearListActivity() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            api().clearListActivity("Bearer $token", listId)
+            _state.value = _state.value.copy(selectedActivity = emptyList(), isOffline = false, message = "История списка очищена")
+        }
+    }
+
     fun renameSelectedList(name: String) = viewModelScope.launch {
         val token = _state.value.token ?: return@launch
         val listId = _state.value.selectedListId ?: return@launch
