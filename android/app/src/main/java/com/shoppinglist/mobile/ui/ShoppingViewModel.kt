@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.shoppinglist.mobile.data.ApiClient
+import com.shoppinglist.mobile.data.ActivityLogDto
 import com.shoppinglist.mobile.data.AuthRequest
 import com.shoppinglist.mobile.data.ItemCreate
 import com.shoppinglist.mobile.data.ItemUpdate
@@ -28,6 +29,7 @@ data class ShoppingUiState(
     val password: String = "",
     val lists: List<ShoppingListDto> = emptyList(),
     val selectedMembers: List<ListMemberDto> = emptyList(),
+    val selectedActivity: List<ActivityLogDto> = emptyList(),
     val inviteUrl: String = "",
     val pendingInviteToken: String? = null,
     val productCatalog: List<String> = emptyList(),
@@ -35,6 +37,8 @@ data class ShoppingUiState(
     val selectedListId: Int? = null,
     val pendingOperationCount: Int = 0,
     val canUndoDelete: Boolean = false,
+    val isOffline: Boolean = false,
+    val lastSuccessfulSync: String? = null,
     val message: String? = null,
     val isLoading: Boolean = false
 )
@@ -89,7 +93,8 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             productCatalog = loadProductCatalog(),
             themeMode = preferences.getString("themeMode", "system") ?: "system",
             selectedListId = preferences.getInt("selectedListId", 0).takeIf { it > 0 },
-            pendingOperationCount = pendingOperations.size
+            pendingOperationCount = pendingOperations.size,
+            lastSuccessfulSync = preferences.getString("lastSuccessfulSync", null)
         )
     )
     val state: StateFlow<ShoppingUiState> = _state.asStateFlow()
@@ -132,10 +137,14 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             val selectedListId = _state.value.selectedListId
             val nextSelected = response.lists.firstOrNull { it.id == selectedListId }?.id ?: response.lists.firstOrNull()?.id
             cacheLists(response.lists)
+            val syncedAt = localTimestamp()
+            preferences.edit().putString("lastSuccessfulSync", syncedAt).apply()
             _state.value = _state.value.copy(
                 lists = response.lists,
                 selectedListId = nextSelected,
                 pendingOperationCount = pendingOperations.size,
+                isOffline = false,
+                lastSuccessfulSync = syncedAt,
                 message = null
             )
             saveSelectedListId(nextSelected)
@@ -196,6 +205,15 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         runRequest {
             val response = api().listMembers("Bearer $token", listId)
             _state.value = _state.value.copy(selectedMembers = response.members)
+        }
+    }
+
+    fun loadActivity() = viewModelScope.launch {
+        val token = _state.value.token ?: return@launch
+        val listId = _state.value.selectedListId ?: return@launch
+        runRequest {
+            val response = api().listActivity("Bearer $token", listId)
+            _state.value = _state.value.copy(selectedActivity = response.events, isOffline = false)
         }
     }
 
@@ -404,7 +422,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
 
     fun selectList(listId: Int) {
         saveSelectedListId(listId)
-        update { copy(selectedListId = listId, selectedMembers = emptyList(), inviteUrl = "") }
+        update { copy(selectedListId = listId, selectedMembers = emptyList(), selectedActivity = emptyList(), inviteUrl = "") }
     }
 
     fun saveServerUrl(serverUrl: String) {
@@ -428,6 +446,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
                 password = "",
                 lists = emptyList(),
                 selectedMembers = emptyList(),
+                selectedActivity = emptyList(),
                 inviteUrl = "",
                 pendingInviteToken = null,
                 selectedListId = null,
@@ -452,6 +471,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             _state.value = _state.value.copy(canUndoDelete = keepUndo && lastDeletedItem != null)
         } catch (error: Exception) {
             offline()
+            _state.value = _state.value.copy(isOffline = true)
         } finally {
             _state.value = _state.value.copy(isLoading = false, pendingOperationCount = pendingOperations.size)
         }
@@ -462,7 +482,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         try {
             block()
         } catch (error: Exception) {
-            _state.value = _state.value.copy(message = error.message ?: "Ошибка")
+            _state.value = _state.value.copy(message = error.message ?: "Ошибка", isOffline = true)
         } finally {
             _state.value = _state.value.copy(isLoading = false, pendingOperationCount = pendingOperations.size)
         }

@@ -11,6 +11,18 @@ data class ShareRequest(val email: String)
 data class InviteResponse(val token: String, val url: String, val app_url: String, val expires_at: String? = null)
 data class MembersResponse(val members: List<ListMemberDto>)
 data class ListMemberDto(val id: Int, val email: String, val is_owner: Boolean)
+data class ActivityResponse(val events: List<ActivityLogDto>)
+data class ActivityLogDto(
+    val id: Int,
+    val list_id: Int?,
+    val user_id: Int?,
+    val user_email: String?,
+    val action: String,
+    val item_id: Int?,
+    val item_name: String,
+    val details: String,
+    val created_at: String
+)
 
 data class SyncResponse(val lists: List<ShoppingListDto>)
 data class ShoppingListDto(

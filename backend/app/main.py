@@ -4,14 +4,18 @@ from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
-from .database import get_db
-from .models import ListInvite, ListMember, ShoppingItem, ShoppingList, User
+from .database import engine, get_db
+from .models import ActivityLog, ListInvite, ListMember, ShoppingItem, ShoppingList, User
 from .schemas import (
+    ActivityResponse,
+    AdminStatusResponse,
     AuthRequest,
+    HealthResponse,
     InviteResponse,
     ItemCreate,
     ItemUpdate,
@@ -27,7 +31,9 @@ from .security import create_access_token, get_current_user, hash_password, veri
 from .setup import get_server_settings, router as setup_router
 
 
-app = FastAPI(title="API синхронизации списка покупок", version="1.2.1")
+APP_VERSION = "1.3.0"
+
+app = FastAPI(title="API синхронизации списка покупок", version=APP_VERSION)
 app.include_router(setup_router)
 
 
@@ -73,9 +79,73 @@ def invite_is_expired(invite: ListInvite) -> bool:
     return invite.expires_at is not None and invite.expires_at < datetime.utcnow()
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+def current_migration() -> str | None:
+    with engine.connect() as connection:
+        return MigrationContext.configure(connection).get_current_revision()
+
+
+def require_admin(user: User) -> None:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступно только администратору")
+
+
+def write_activity(
+    db: Session,
+    user: User,
+    action: str,
+    list_id: int | None = None,
+    item_id: int | None = None,
+    item_name: str = "",
+    details: str = "",
+) -> None:
+    db.add(
+        ActivityLog(
+            list_id=list_id,
+            user_id=user.id,
+            action=action,
+            item_id=item_id,
+            item_name=item_name[:180],
+            details=details[:255],
+        )
+    )
+
+
+@app.get("/health", response_model=HealthResponse)
+def health(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "database": "ok",
+        "migration": current_migration(),
+        "server_time": datetime.utcnow(),
+    }
+
+
+@app.get("/admin/status", response_model=AdminStatusResponse)
+def admin_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_admin(current_user)
+    server_settings = get_server_settings(db)
+    now = datetime.utcnow()
+    return {
+        "version": APP_VERSION,
+        "database": "ok",
+        "migration": current_migration(),
+        "server_time": now,
+        "users_count": db.scalar(select(func.count(User.id))) or 0,
+        "lists_count": db.scalar(select(func.count(ShoppingList.id))) or 0,
+        "items_count": db.scalar(select(func.count(ShoppingItem.id))) or 0,
+        "checked_items_count": db.scalar(select(func.count(ShoppingItem.id)).where(ShoppingItem.is_checked.is_(True))) or 0,
+        "invites_active_count": db.scalar(
+            select(func.count(ListInvite.id)).where(ListInvite.used_at.is_(None), (ListInvite.expires_at.is_(None)) | (ListInvite.expires_at >= now))
+        ) or 0,
+        "pending_invites_count": db.scalar(select(func.count(ListInvite.id)).where(ListInvite.used_at.is_(None))) or 0,
+        "invite_token_hours": settings.invite_token_hours,
+        "app_name": server_settings.app_name,
+        "external_url": server_settings.external_url,
+        "allow_registration": server_settings.allow_registration,
+        "setup_completed": server_settings.setup_completed,
+    }
 
 
 @app.get("/server-config", response_model=PublicServerConfig)
@@ -130,6 +200,7 @@ def create_list(payload: ListCreate, current_user: User = Depends(get_current_us
     db.add(shopping_list)
     db.flush()
     db.add(ListMember(list_id=shopping_list.id, user_id=current_user.id))
+    write_activity(db, current_user, "list_created", list_id=shopping_list.id, details=shopping_list.name)
     db.commit()
     return {"id": shopping_list.id, "name": shopping_list.name}
 
@@ -142,7 +213,9 @@ def update_list(
     db: Session = Depends(get_db),
 ):
     shopping_list = require_list_owner(db, current_user, list_id)
+    old_name = shopping_list.name
     shopping_list.name = payload.name
+    write_activity(db, current_user, "list_renamed", list_id=shopping_list.id, details=f"{old_name} -> {payload.name}")
     db.commit()
     return {"id": shopping_list.id, "name": shopping_list.name}
 
@@ -151,12 +224,14 @@ def update_list(
 def delete_list(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     shopping_list = require_list_access(db, current_user, list_id)
     if shopping_list.owner_id == current_user.id:
+        write_activity(db, current_user, "list_deleted", list_id=shopping_list.id, details=shopping_list.name)
         db.delete(shopping_list)
     else:
         membership = db.scalar(
             select(ListMember).where(ListMember.list_id == shopping_list.id, ListMember.user_id == current_user.id)
         )
         if membership is not None:
+            write_activity(db, current_user, "list_left", list_id=shopping_list.id, details=shopping_list.name)
             db.delete(membership)
     db.commit()
     return {"status": "deleted"}
@@ -168,6 +243,7 @@ def clear_list(list_id: int, current_user: User = Depends(get_current_user), db:
     items = db.scalars(select(ShoppingItem).where(ShoppingItem.list_id == shopping_list.id)).all()
     for item in items:
         db.delete(item)
+    write_activity(db, current_user, "list_cleared", list_id=shopping_list.id, details=f"Удалено позиций: {len(items)}")
     db.commit()
     return {"status": "cleared"}
 
@@ -180,6 +256,7 @@ def clear_checked_items(list_id: int, current_user: User = Depends(get_current_u
     ).all()
     for item in items:
         db.delete(item)
+    write_activity(db, current_user, "checked_items_cleared", list_id=shopping_list.id, details=f"Удалено позиций: {len(items)}")
     db.commit()
     return {"status": "cleared"}
 
@@ -192,6 +269,7 @@ def restore_checked_items(list_id: int, current_user: User = Depends(get_current
     ).all()
     for item in items:
         item.is_checked = False
+    write_activity(db, current_user, "checked_items_restored", list_id=shopping_list.id, details=f"Возвращено позиций: {len(items)}")
     db.commit()
     return {"status": "restored", "count": len(items)}
 
@@ -213,6 +291,7 @@ def copy_list(list_id: int, current_user: User = Depends(get_current_user), db: 
                 is_checked=False,
             )
         )
+    write_activity(db, current_user, "list_copied", list_id=copied.id, details=f"Источник: {source.name}")
     db.commit()
     return {"id": copied.id, "name": copied.name}
 
@@ -234,6 +313,34 @@ def list_members(list_id: int, current_user: User = Depends(get_current_user), d
     }
 
 
+@app.get("/lists/{list_id}/activity", response_model=ActivityResponse)
+def list_activity(list_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shopping_list = require_list_access(db, current_user, list_id)
+    rows = db.execute(
+        select(ActivityLog, User.email)
+        .outerjoin(User, User.id == ActivityLog.user_id)
+        .where(ActivityLog.list_id == shopping_list.id)
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+        .limit(100)
+    ).all()
+    return {
+        "events": [
+            {
+                "id": event.id,
+                "list_id": event.list_id,
+                "user_id": event.user_id,
+                "user_email": email,
+                "action": event.action,
+                "item_id": event.item_id,
+                "item_name": event.item_name,
+                "details": event.details,
+                "created_at": event.created_at,
+            }
+            for event, email in rows
+        ]
+    }
+
+
 @app.post("/lists/{list_id}/share")
 def share_list(
     list_id: int,
@@ -246,6 +353,7 @@ def share_list(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
     add_member_if_missing(db, shopping_list.id, user.id)
+    write_activity(db, current_user, "list_shared", list_id=shopping_list.id, details=user.email)
     db.commit()
     return {"status": "shared"}
 
@@ -260,6 +368,7 @@ def create_invite(list_id: int, current_user: User = Depends(get_current_user), 
         expires_at=datetime.utcnow() + timedelta(hours=settings.invite_token_hours),
     )
     db.add(invite)
+    write_activity(db, current_user, "invite_created", list_id=shopping_list.id, details=f"До {invite.expires_at.isoformat()}")
     db.commit()
     db.refresh(invite)
 
@@ -275,6 +384,7 @@ def accept_invite(token: str, current_user: User = Depends(get_current_user), db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
     add_member_if_missing(db, invite.list_id, current_user.id)
     invite.used_at = datetime.utcnow()
+    write_activity(db, current_user, "invite_accepted", list_id=invite.list_id)
     db.commit()
     return {"status": "joined", "list_id": invite.list_id}
 
@@ -329,6 +439,8 @@ def create_item(
     require_list_access(db, current_user, list_id)
     item = ShoppingItem(list_id=list_id, name=payload.name, quantity=payload.quantity)
     db.add(item)
+    db.flush()
+    write_activity(db, current_user, "item_created", list_id=list_id, item_id=item.id, item_name=item.name, details=item.quantity)
     db.commit()
     db.refresh(item)
     return item
@@ -346,8 +458,18 @@ def update_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Товар не найден")
     require_list_access(db, current_user, item.list_id)
     update = payload.model_dump(exclude_unset=True)
+    old_checked = item.is_checked
+    old_name = item.name
     for key, value in update.items():
         setattr(item, key, value)
+    if "is_checked" in update and update["is_checked"] != old_checked:
+        action = "item_checked" if update["is_checked"] else "item_unchecked"
+    elif "name" in update or "quantity" in update:
+        action = "item_updated"
+    else:
+        action = "item_updated"
+    details = f"{old_name} -> {item.name}" if old_name != item.name else item.quantity
+    write_activity(db, current_user, action, list_id=item.list_id, item_id=item.id, item_name=item.name, details=details)
     db.commit()
     db.refresh(item)
     return item
@@ -359,6 +481,7 @@ def delete_item(item_id: int, current_user: User = Depends(get_current_user), db
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Товар не найден")
     require_list_access(db, current_user, item.list_id)
+    write_activity(db, current_user, "item_deleted", list_id=item.list_id, item_id=item.id, item_name=item.name, details=item.quantity)
     db.delete(item)
     db.commit()
     return {"status": "deleted"}

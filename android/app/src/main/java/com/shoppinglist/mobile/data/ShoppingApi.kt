@@ -49,6 +49,12 @@ interface ShoppingApi {
         @Path("listId") listId: Int
     ): MembersResponse
 
+    @GET("lists/{listId}/activity")
+    suspend fun listActivity(
+        @Header("Authorization") authorization: String,
+        @Path("listId") listId: Int
+    ): ActivityResponse
+
     @POST("lists/{listId}/items")
     suspend fun createItem(
         @Header("Authorization") authorization: String,

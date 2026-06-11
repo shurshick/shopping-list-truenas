@@ -56,6 +56,48 @@ class MembersResponse(BaseModel):
     members: list[ListMemberResponse]
 
 
+class ActivityLogResponse(BaseModel):
+    id: int
+    list_id: int | None
+    user_id: int | None
+    user_email: EmailStr | None = None
+    action: str
+    item_id: int | None
+    item_name: str
+    details: str
+    created_at: datetime
+
+
+class ActivityResponse(BaseModel):
+    events: list[ActivityLogResponse]
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    database: str
+    migration: str | None
+    server_time: datetime
+
+
+class AdminStatusResponse(BaseModel):
+    version: str
+    database: str
+    migration: str | None
+    server_time: datetime
+    users_count: int
+    lists_count: int
+    items_count: int
+    checked_items_count: int
+    invites_active_count: int
+    pending_invites_count: int
+    invite_token_hours: int
+    app_name: str
+    external_url: str
+    allow_registration: bool
+    setup_completed: bool
+
+
 class InviteResponse(BaseModel):
     token: str
     url: str

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Logout
@@ -117,6 +118,7 @@ class MainActivity : ComponentActivity() {
                             viewModel::deleteItem,
                             viewModel::shareList,
                             viewModel::loadMembers,
+                            viewModel::loadActivity,
                             viewModel::renameSelectedList,
                             viewModel::copySelectedList,
                             viewModel::deleteSelectedList,
@@ -216,6 +218,7 @@ private fun ShoppingScreen(
     onDeleteItem: (Int) -> Unit,
     onShareList: (String) -> Unit,
     onLoadMembers: () -> Unit,
+    onLoadActivity: () -> Unit,
     onRenameList: (String) -> Unit,
     onCopyList: () -> Unit,
     onDeleteList: () -> Unit,
@@ -240,6 +243,7 @@ private fun ShoppingScreen(
     var selectListDialogOpen by remember { mutableStateOf(false) }
     var shareDialogOpen by remember { mutableStateOf(false) }
     var membersDialogOpen by remember { mutableStateOf(false) }
+    var activityDialogOpen by remember { mutableStateOf(false) }
     var renameDialogOpen by remember { mutableStateOf(false) }
     var deleteDialogOpen by remember { mutableStateOf(false) }
     var clearDialogOpen by remember { mutableStateOf(false) }
@@ -294,6 +298,11 @@ private fun ShoppingScreen(
                             listMenuOpen = false
                             onLoadMembers()
                             membersDialogOpen = true
+                        },
+                        onActivity = {
+                            listMenuOpen = false
+                            onLoadActivity()
+                            activityDialogOpen = true
                         },
                         onRename = {
                             listMenuOpen = false
@@ -398,6 +407,17 @@ private fun ShoppingScreen(
                     )
                 }
 
+                if (state.isOffline || state.pendingOperationCount > 0 || state.lastSuccessfulSync != null) {
+                    item {
+                        SyncStatusCard(
+                            isOffline = state.isOffline,
+                            pendingOperationCount = state.pendingOperationCount,
+                            lastSuccessfulSync = state.lastSuccessfulSync,
+                            onSync = onSync
+                        )
+                    }
+                }
+
                 if (state.canUndoDelete) {
                     item {
                         DeletedItemUndoCard(onUndo = onUndoDeleteItem)
@@ -443,15 +463,6 @@ private fun ShoppingScreen(
                     Text(it, color = MaterialTheme.colorScheme.primary)
                 }
             }
-            if (state.pendingOperationCount > 0) {
-                item {
-                    Text(
-                        "Ожидает синхронизации: ${state.pendingOperationCount}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
-            }
         }
     }
 
@@ -491,6 +502,13 @@ private fun ShoppingScreen(
         MembersDialog(
             members = state.selectedMembers,
             onDismiss = { membersDialogOpen = false }
+        )
+    }
+
+    if (activityDialogOpen) {
+        ActivityDialog(
+            events = state.selectedActivity,
+            onDismiss = { activityDialogOpen = false }
         )
     }
 
@@ -625,6 +643,49 @@ private fun DeletedItemUndoCard(onUndo: () -> Unit) {
 }
 
 @Composable
+private fun SyncStatusCard(
+    isOffline: Boolean,
+    pendingOperationCount: Int,
+    lastSuccessfulSync: String?,
+    onSync: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    if (isOffline) "Сервер недоступен" else "Синхронизация активна",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isOffline) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                )
+                if (pendingOperationCount > 0) {
+                    Text(
+                        "Ожидает отправки: $pendingOperationCount",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                lastSuccessfulSync?.let {
+                    Text(
+                        "Последняя синхронизация: ${formatDateTime(it)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            IconButton(onClick = onSync, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Refresh, contentDescription = "Повторить синхронизацию")
+            }
+        }
+    }
+}
+
+@Composable
 private fun ShoppingItemRow(
     item: com.shoppinglist.mobile.data.ShoppingItemDto,
     onToggleItem: (Int, Boolean) -> Unit,
@@ -732,6 +793,7 @@ private fun ListDropdownMenu(
     enabled: Boolean,
     onDismiss: () -> Unit,
     onMembers: () -> Unit,
+    onActivity: () -> Unit,
     onRename: () -> Unit,
     onCopy: () -> Unit,
     onClear: () -> Unit,
@@ -747,6 +809,12 @@ private fun ListDropdownMenu(
             leadingIcon = { Icon(Icons.Default.People, contentDescription = null) },
             enabled = enabled,
             onClick = onMembers
+        )
+        DropdownMenuItem(
+            text = { Text("История") },
+            leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+            enabled = enabled,
+            onClick = onActivity
         )
         DropdownMenuItem(
             text = { Text("Переименовать") },
@@ -913,6 +981,75 @@ private fun MembersDialog(members: List<com.shoppinglist.mobile.data.ListMemberD
             Button(onClick = onDismiss) { Text("Закрыть") }
         }
     )
+}
+
+@Composable
+private fun ActivityDialog(events: List<com.shoppinglist.mobile.data.ActivityLogDto>, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("История списка") },
+        text = {
+            if (events.isEmpty()) {
+                Text("История пока пуста или загружается...")
+            } else {
+                LazyColumn(modifier = Modifier.height(360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(events) { event ->
+                        Column {
+                            Text(activityTitle(event), style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                listOfNotNull(event.user_email, formatDateTime(event.created_at)).joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (event.details.isNotBlank()) {
+                                Text(
+                                    event.details,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+private fun activityTitle(event: com.shoppinglist.mobile.data.ActivityLogDto): String {
+    val itemName = event.item_name.ifBlank { "товар" }
+    return when (event.action) {
+        "list_created" -> "Создан список"
+        "list_renamed" -> "Список переименован"
+        "list_deleted" -> "Список удалён"
+        "list_left" -> "Пользователь вышел из списка"
+        "list_cleared" -> "Список очищен"
+        "checked_items_cleared" -> "Купленные товары очищены"
+        "checked_items_restored" -> "Купленные товары возвращены"
+        "list_copied" -> "Список скопирован"
+        "list_shared" -> "Открыт доступ к списку"
+        "invite_created" -> "Создана ссылка-приглашение"
+        "invite_accepted" -> "Принято приглашение"
+        "item_created" -> "Добавлен товар: $itemName"
+        "item_updated" -> "Изменён товар: $itemName"
+        "item_checked" -> "Куплено: $itemName"
+        "item_unchecked" -> "Возвращено к покупке: $itemName"
+        "item_deleted" -> "Удалён товар: $itemName"
+        else -> event.action
+    }
+}
+
+private fun formatDateTime(value: String): String {
+    return runCatching {
+        val instant = java.time.Instant.parse(value)
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+            .withZone(java.time.ZoneId.systemDefault())
+        formatter.format(instant)
+    }.getOrDefault(value)
 }
 
 @Composable
