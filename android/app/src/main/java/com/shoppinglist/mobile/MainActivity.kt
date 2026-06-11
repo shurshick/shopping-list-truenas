@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -238,7 +240,7 @@ private fun ShoppingScreen(
                         Icon(Icons.Default.Refresh, contentDescription = "Обновить")
                     }
                     IconButton(onClick = { listMenuOpen = true }, enabled = selectedList != null) {
-                        Icon(Icons.Default.ShoppingCart, contentDescription = "Меню списка")
+                        Icon(Icons.Default.Settings, contentDescription = "Меню списка")
                     }
                     ListDropdownMenu(
                         expanded = listMenuOpen,
@@ -334,23 +336,24 @@ private fun ShoppingScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
                         ) {
                             Checkbox(
                                 checked = item.is_checked,
-                                onCheckedChange = { checked -> onToggleItem(item.id, checked) }
+                                onCheckedChange = { checked -> onToggleItem(item.id, checked) },
+                                modifier = Modifier.size(40.dp)
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = item.name,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.titleSmall,
                                     textDecoration = if (item.is_checked) TextDecoration.LineThrough else TextDecoration.None
                                 )
                                 if (item.quantity.isNotBlank()) {
-                                    Text(item.quantity, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(item.quantity, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
-                            IconButton(onClick = { onDeleteItem(item.id) }) {
+                            IconButton(onClick = { onDeleteItem(item.id) }, modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.Delete, contentDescription = "Удалить товар")
                             }
                         }
@@ -489,23 +492,27 @@ private fun ItemCreateCard(
     }
 
     ElevatedCard {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     itemName,
                     onItemName,
                     label = { Text("Товар") },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
                     singleLine = true
                 )
                 OutlinedTextField(
                     quantity,
                     onQuantity,
                     label = { Text("Кол-во") },
-                    modifier = Modifier.weight(0.65f),
+                    modifier = Modifier
+                        .weight(0.65f)
+                        .height(56.dp),
                     singleLine = true
                 )
-                IconButton(onClick = onAdd) {
+                IconButton(onClick = onAdd, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.Add, contentDescription = "Добавить товар")
                 }
             }
