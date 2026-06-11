@@ -8,12 +8,28 @@ android {
     namespace = "com.shoppinglist.mobile"
     compileSdk = 35
 
+    signingConfigs {
+        create("githubRelease") {
+            storeFile = file("signing/shopping-list-upload.p12")
+            storePassword = "shopping-list"
+            keyAlias = "shopping-list"
+            keyPassword = "shopping-list"
+            storeType = "pkcs12"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.shoppinglist.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.2.2"
+        versionCode = 6
+        versionName = "0.2.3"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("githubRelease")
+        }
     }
 
     buildFeatures {
