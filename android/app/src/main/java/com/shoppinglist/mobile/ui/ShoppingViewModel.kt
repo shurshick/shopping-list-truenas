@@ -2,8 +2,11 @@ package com.shoppinglist.mobile.ui
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.shoppinglist.mobile.data.ApiClient
@@ -61,10 +64,12 @@ private data class DeletedItemSnapshot(
 
 class ShoppingViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("shopping-list", Context.MODE_PRIVATE)
+    private val securePreferences = createSecurePreferences(application)
     private val gson = Gson()
     private var pendingOperations = loadPendingOperations()
     private var lastDeletedItem: DeletedItemSnapshot? = null
     private var undoDeleteJob: Job? = null
+    private val initialToken = migrateLegacyToken()
     private val defaultProducts = listOf(
         "Хлеб",
         "Молоко",
@@ -90,7 +95,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     )
     private val _state = MutableStateFlow(
         ShoppingUiState(
-            token = preferences.getString("token", null),
+            token = initialToken,
             serverUrl = preferences.getString("serverUrl", "") ?: "",
             lists = loadCachedLists(),
             productCatalog = loadProductCatalog(),
@@ -121,10 +126,8 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             } else {
                 api.login(AuthRequest(current.email, current.password))
             }
-            preferences.edit()
-                .putString("token", response.access_token)
-                .putString("serverUrl", current.serverUrl.trim())
-                .apply()
+            securePreferences.edit().putString("token", response.access_token).apply()
+            preferences.edit().putString("serverUrl", current.serverUrl.trim()).remove("token").apply()
             _state.value = current.copy(token = response.access_token, password = "", message = null)
             sync()
             _state.value.pendingInviteToken?.let { acceptInvite(it) }
@@ -452,6 +455,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun logout() {
+        securePreferences.edit().remove("token").apply()
         preferences.edit().remove("token").apply()
         undoDeleteJob?.cancel()
         lastDeletedItem = null
@@ -657,6 +661,32 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
 
     private fun update(block: ShoppingUiState.() -> ShoppingUiState) {
         _state.value = _state.value.block()
+    }
+
+    private fun createSecurePreferences(context: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            context,
+            "shopping-list-secure",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    private fun migrateLegacyToken(): String? {
+        val encryptedToken = securePreferences.getString("token", null)
+        val legacyToken = preferences.getString("token", null)
+        if (!legacyToken.isNullOrBlank()) {
+            if (encryptedToken.isNullOrBlank()) {
+                securePreferences.edit().putString("token", legacyToken).apply()
+            }
+            preferences.edit().remove("token").apply()
+            return encryptedToken ?: legacyToken
+        }
+        return encryptedToken
     }
 
     private fun showUndoDelete(message: String, updatePendingCount: Boolean = false) {

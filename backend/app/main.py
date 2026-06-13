@@ -2,7 +2,7 @@ import secrets
 from html import escape
 from datetime import datetime, timedelta
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import delete, func, select, text
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from .config import settings
 from .database import engine, get_db
 from .models import ActivityLog, ListInvite, ListMember, ShoppingItem, ShoppingList, User
+from .rate_limit import check_rate_limit
 from .schemas import (
     ActivityResponse,
     AdminStatusResponse,
@@ -31,7 +32,7 @@ from .security import create_access_token, get_current_user, hash_password, veri
 from .setup import get_server_settings, router as setup_router
 
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.7"
 
 app = FastAPI(title="API синхронизации списка покупок", version=APP_VERSION)
 app.include_router(setup_router)
@@ -392,7 +393,8 @@ def server_config(db: Session = Depends(get_db)):
 
 
 @app.post("/auth/register", response_model=TokenResponse)
-def register(payload: AuthRequest, db: Session = Depends(get_db)):
+def register(payload: AuthRequest, request: Request, db: Session = Depends(get_db)):
+    check_rate_limit(request, "register", payload.email, limit=8, window_seconds=60)
     server_settings = get_server_settings(db)
     if not server_settings.setup_completed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Первичная настройка сервера не завершена")
@@ -411,7 +413,8 @@ def register(payload: AuthRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/login", response_model=TokenResponse)
-def login(payload: AuthRequest, db: Session = Depends(get_db)):
+def login(payload: AuthRequest, request: Request, db: Session = Depends(get_db)):
+    check_rate_limit(request, "login", payload.email, limit=10, window_seconds=60)
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный email или пароль")
@@ -625,7 +628,7 @@ def create_invite(list_id: int, current_user: User = Depends(get_current_user), 
 
 @app.post("/invites/{token}/accept")
 def accept_invite(token: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    invite = db.scalar(select(ListInvite).where(ListInvite.token == token))
+    invite = db.scalar(select(ListInvite).where(ListInvite.token == token).with_for_update())
     if invite is None or invite.used_at is not None or invite_is_expired(invite):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Приглашение не найдено")
     add_member_if_missing(db, invite.list_id, current_user.id)

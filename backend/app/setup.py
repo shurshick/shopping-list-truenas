@@ -1,12 +1,14 @@
 import logging
 from html import escape
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .csrf import create_csrf_token, require_csrf_token, require_same_origin
 from .database import get_db
 from .models import ServerSetting, User
+from .rate_limit import check_rate_limit
 from .security import hash_password, verify_password
 
 
@@ -34,7 +36,13 @@ def verify_admin(db: Session, email: str, password: str) -> User | None:
     return user
 
 
-def render_setup_page(server_settings: ServerSetting, needs_admin_creation: bool, message: str = "") -> str:
+def render_setup_page(
+    server_settings: ServerSetting,
+    needs_admin_creation: bool,
+    message: str = "",
+    csrf_token: str = "",
+) -> str:
+    csrf_token = csrf_token or create_csrf_token()
     admin_title = "Создание администратора" if needs_admin_creation else "Вход администратора"
     password_extra = """
               <label for="admin_password_confirm">Повторите пароль администратора</label>
@@ -106,6 +114,7 @@ def render_setup_page(server_settings: ServerSetting, needs_admin_creation: bool
             <p>Настройте сервер и учетную запись администратора.</p>
             {f'<div class="message">{escape(message)}</div>' if message else ''}
             <form method="post" action="/setup">
+              <input type="hidden" name="csrf_token" value="{escape(csrf_token)}" />
               <h2>{admin_title}</h2>
               <label for="admin_email">Email администратора</label>
               <input id="admin_email" name="admin_email" type="email" required maxlength="255" autocomplete="username" />
@@ -144,19 +153,25 @@ def setup_page(message: str = "", db: Session = Depends(get_db)):
         server_settings,
         needs_admin_creation=not has_admin_user(db),
         message=display_message,
+        csrf_token=create_csrf_token(),
     )
 
 
 @router.post("/setup")
 def save_setup(
+    request: Request,
     admin_email: str = Form(...),
     admin_password: str = Form(...),
     admin_password_confirm: str = Form(default=""),
     app_name: str = Form(...),
     external_url: str = Form(...),
     allow_registration: bool = Form(default=False),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
 ):
+    require_same_origin(request)
+    require_csrf_token(csrf_token)
+    check_rate_limit(request, "setup", admin_email, limit=8, window_seconds=60)
     needs_admin_creation = not has_admin_user(db)
     email = admin_email.strip().lower()
     server_settings = get_server_settings(db)

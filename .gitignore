@@ -6,3 +6,4 @@ build/
 local.properties
 outputs/
 work/
+backend/tests/*.sqlite3
