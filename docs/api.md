@@ -1,6 +1,6 @@
 # API сервера
 
-Актуально для версии `v1.4.0`.
+Актуально для версии `v1.4.1`.
 
 Базовый адрес: `https://your-domain.example`
 
@@ -111,7 +111,7 @@ X-Client-Operation-Id: <uuid>
 ```json
 {
   "status": "ok",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "timestamp": "2026-06-13T12:00:00"
 }
 ```
