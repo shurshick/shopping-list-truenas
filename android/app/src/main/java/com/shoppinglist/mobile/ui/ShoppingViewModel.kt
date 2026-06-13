@@ -1,12 +1,8 @@
 package com.shoppinglist.mobile.ui
 
 import android.app.Application
-import android.content.Context
-import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.shoppinglist.mobile.data.ApiClient
@@ -20,6 +16,10 @@ import com.shoppinglist.mobile.data.ListUpdate
 import com.shoppinglist.mobile.data.ShareRequest
 import com.shoppinglist.mobile.data.ShoppingItemDto
 import com.shoppinglist.mobile.data.ShoppingListDto
+import com.shoppinglist.mobile.data.local.AppPreferences
+import com.shoppinglist.mobile.data.local.OfflineQueueStorage
+import com.shoppinglist.mobile.data.local.ProductCatalogStorage
+import com.shoppinglist.mobile.data.local.TokenStorage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,13 +66,11 @@ private data class DeletedItemSnapshot(
 )
 
 class ShoppingViewModel(application: Application) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("shopping-list", Context.MODE_PRIVATE)
-    private val securePreferences = createSecurePreferences(application)
     private val gson = Gson()
-    private var pendingOperations = loadPendingOperations()
-    private var lastDeletedItem: DeletedItemSnapshot? = null
-    private var undoDeleteJob: Job? = null
-    private val initialToken = migrateLegacyToken()
+    private val tokenStorage = TokenStorage(application)
+    private val appPreferences = AppPreferences(application, gson)
+    private val offlineQueueStorage = OfflineQueueStorage(application)
+    private val productCatalogStorage = ProductCatalogStorage(application)
     private val defaultProducts = listOf(
         "Хлеб",
         "Молоко",
@@ -96,16 +94,20 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         "Чай",
         "Кофе"
     )
+    private var pendingOperations = loadPendingOperations()
+    private var lastDeletedItem: DeletedItemSnapshot? = null
+    private var undoDeleteJob: Job? = null
+    private val initialToken = tokenStorage.loadToken()
     private val _state = MutableStateFlow(
         ShoppingUiState(
             token = initialToken,
-            serverUrl = preferences.getString("serverUrl", "") ?: "",
-            lists = loadCachedLists(),
-            productCatalog = loadProductCatalog(),
-            themeMode = preferences.getString("themeMode", "system") ?: "system",
-            selectedListId = preferences.getInt("selectedListId", 0).takeIf { it > 0 },
+            serverUrl = appPreferences.serverUrl,
+            lists = appPreferences.loadCachedLists(),
+            productCatalog = productCatalogStorage.load(defaultProducts),
+            themeMode = appPreferences.themeMode,
+            selectedListId = appPreferences.selectedListId,
             pendingOperationCount = pendingOperations.size,
-            lastSuccessfulSync = preferences.getString("lastSuccessfulSync", null)
+            lastSuccessfulSync = appPreferences.lastSuccessfulSync
         )
     )
     val state: StateFlow<ShoppingUiState> = _state.asStateFlow()
@@ -129,8 +131,8 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             } else {
                 api.login(AuthRequest(current.email, current.password))
             }
-            securePreferences.edit().putString("token", response.access_token).apply()
-            preferences.edit().putString("serverUrl", current.serverUrl.trim()).remove("token").apply()
+            tokenStorage.saveToken(response.access_token)
+            appPreferences.serverUrl = current.serverUrl.trim()
             _state.value = current.copy(token = response.access_token, password = "", message = null)
             sync()
             _state.value.pendingInviteToken?.let { acceptInvite(it) }
@@ -147,7 +149,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             val nextSelected = response.lists.firstOrNull { it.id == selectedListId }?.id ?: response.lists.firstOrNull()?.id
             cacheLists(response.lists)
             val syncedAt = localTimestamp()
-            preferences.edit().putString("lastSuccessfulSync", syncedAt).apply()
+            appPreferences.lastSuccessfulSync = syncedAt
             _state.value = _state.value.copy(
                 lists = response.lists,
                 selectedListId = nextSelected,
@@ -515,19 +517,18 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
 
     fun saveServerUrl(serverUrl: String) {
         val trimmedUrl = serverUrl.trim()
-        preferences.edit().putString("serverUrl", trimmedUrl).apply()
+        appPreferences.serverUrl = trimmedUrl
         update { copy(serverUrl = trimmedUrl, message = "Адрес сервера сохранен") }
     }
 
     fun saveThemeMode(themeMode: String) {
         val safeThemeMode = if (themeMode in listOf("system", "light", "dark")) themeMode else "system"
-        preferences.edit().putString("themeMode", safeThemeMode).apply()
+        appPreferences.themeMode = safeThemeMode
         update { copy(themeMode = safeThemeMode) }
     }
 
     fun logout() {
-        securePreferences.edit().remove("token").apply()
-        preferences.edit().remove("token").apply()
+        tokenStorage.clearToken()
         undoDeleteJob?.cancel()
         lastDeletedItem = null
         update {
@@ -759,32 +760,6 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
         _state.value = _state.value.block()
     }
 
-    private fun createSecurePreferences(context: Context): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            "shopping-list-secure",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
-
-    private fun migrateLegacyToken(): String? {
-        val encryptedToken = securePreferences.getString("token", null)
-        val legacyToken = preferences.getString("token", null)
-        if (!legacyToken.isNullOrBlank()) {
-            if (encryptedToken.isNullOrBlank()) {
-                securePreferences.edit().putString("token", legacyToken).apply()
-            }
-            preferences.edit().remove("token").apply()
-            return encryptedToken ?: legacyToken
-        }
-        return encryptedToken
-    }
-
     private fun showUndoDelete(message: String, updatePendingCount: Boolean = false) {
         update {
             copy(
@@ -818,25 +793,15 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     private fun PendingOperation.operationId(): String = clientOperationId ?: newOperationId()
 
     private fun nextTempId(): Int {
-        val nextId = preferences.getInt("nextTempItemId", -1)
-        preferences.edit().putInt("nextTempItemId", nextId - 1).apply()
-        return nextId
-    }
-
-    private fun loadCachedLists(): List<ShoppingListDto> {
-        val stored = preferences.getString("cachedLists", null) ?: return emptyList()
-        return runCatching {
-            val type = object : TypeToken<List<ShoppingListDto>>() {}.type
-            gson.fromJson<List<ShoppingListDto>>(stored, type)
-        }.getOrDefault(emptyList())
+        return appPreferences.nextTempId()
     }
 
     private fun cacheLists(lists: List<ShoppingListDto>) {
-        preferences.edit().putString("cachedLists", gson.toJson(lists)).apply()
+        appPreferences.cacheLists(lists)
     }
 
     private fun loadPendingOperations(): List<PendingOperation> {
-        val stored = preferences.getString("pendingOperations", null) ?: return emptyList()
+        val stored = offlineQueueStorage.loadJson() ?: return emptyList()
         return runCatching {
             val type = object : TypeToken<List<PendingOperation>>() {}.type
             gson.fromJson<List<PendingOperation>>(stored, type)
@@ -844,28 +809,11 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun savePendingOperations() {
-        preferences.edit().putString("pendingOperations", gson.toJson(pendingOperations)).apply()
+        offlineQueueStorage.saveJson(gson.toJson(pendingOperations))
     }
 
     private fun saveSelectedListId(listId: Int?) {
-        val editor = preferences.edit()
-        if (listId == null) {
-            editor.remove("selectedListId")
-        } else {
-            editor.putInt("selectedListId", listId)
-        }
-        editor.apply()
-    }
-
-    private fun loadProductCatalog(): List<String> {
-        val stored = preferences.getString("productCatalog", null)
-        return stored
-            ?.split("\n")
-            ?.map { it.trim() }
-            ?.filter { it.isNotBlank() }
-            ?.distinct()
-            ?.sortedWith(String.CASE_INSENSITIVE_ORDER)
-            ?: defaultProducts
+        appPreferences.selectedListId = listId
     }
 
     private fun saveProductCatalog(catalog: List<String>) {
@@ -874,7 +822,7 @@ class ShoppingViewModel(application: Application) : AndroidViewModel(application
             .filter { it.isNotBlank() }
             .distinct()
             .sortedWith(String.CASE_INSENSITIVE_ORDER)
-        preferences.edit().putString("productCatalog", cleanedCatalog.joinToString("\n")).apply()
+        productCatalogStorage.save(cleanedCatalog)
         _state.value = _state.value.copy(productCatalog = cleanedCatalog)
     }
 }
