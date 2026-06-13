@@ -189,7 +189,7 @@ def test_metrics_contains_counts_and_no_email(client):
     response = client.get("/metrics")
 
     assert response.status_code == 200
-    assert response.json()["version"] == "1.4.0"
+    assert response.json()["version"] == "1.4.1"
     assert "users_total" in response.json()
     assert "metrics@example.com" not in response.text
 
@@ -222,3 +222,15 @@ def test_admin_system_shows_migration_status(client):
     assert response.status_code == 200
     assert "migration" in response.json()
     assert "jwt_secret" not in response.text.lower()
+
+
+def test_admin_page_links_new_ops_sections(client):
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert 'data-admin-view="users"' in response.text
+    assert 'data-admin-view="lists"' in response.text
+    assert 'data-admin-view="invites"' in response.text
+    assert 'data-admin-view="system"' in response.text
+    assert 'data-admin-view="logs"' in response.text
+    assert 'data-admin-view="diagnostics"' in response.text

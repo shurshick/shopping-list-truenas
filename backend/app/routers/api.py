@@ -34,7 +34,7 @@ from ..services.migration_service import current_revision
 from ..setup import get_server_settings
 
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 router = APIRouter()
 
@@ -87,11 +87,19 @@ def render_admin_page() -> str:
           }}
           button.secondary {{ background: #e8eef5; color: #1f2933; }}
           .actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }}
+          .toolbar {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }}
           .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }}
           .card {{ border: 1px solid #e1e7ef; border-radius: 8px; padding: 16px; background: #fbfcfe; }}
           .label {{ color: #65758b; font-size: 13px; margin-bottom: 6px; }}
           .value {{ font-size: 24px; font-weight: 750; overflow-wrap: anywhere; }}
           .small .value {{ font-size: 16px; font-weight: 650; }}
+          table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
+          th, td {{ border-bottom: 1px solid #e1e7ef; padding: 10px 8px; text-align: left; vertical-align: top; }}
+          th {{ color: #52616f; font-size: 13px; font-weight: 750; }}
+          td {{ overflow-wrap: anywhere; }}
+          pre {{ background: #101828; color: #eef2f6; border-radius: 8px; padding: 16px; overflow: auto; }}
+          button.danger {{ background: #b42318; }}
+          button.compact {{ min-height: 36px; padding: 0 12px; font-size: 14px; }}
           .message {{
             display: none;
             margin-bottom: 16px;
@@ -134,6 +142,21 @@ def render_admin_page() -> str:
               <a href="/setup"><button type="button" class="secondary">Настройки сервера</button></a>
             </div>
           </section>
+
+          <section id="ops-section" class="hidden">
+            <h2>Администрирование</h2>
+            <div class="toolbar">
+              <button type="button" class="secondary" data-admin-view="users">Пользователи</button>
+              <button type="button" class="secondary" data-admin-view="lists">Списки</button>
+              <button type="button" class="secondary" data-admin-view="invites">Приглашения</button>
+              <button type="button" class="secondary" data-admin-view="system">Система</button>
+              <button type="button" class="secondary" data-admin-view="logs">Логи</button>
+              <button type="button" class="secondary" data-admin-view="diagnostics">Диагностика</button>
+            </div>
+            <div id="ops-panel">
+              <p>Выберите раздел администрирования.</p>
+            </div>
+          </section>
         </main>
 
         <script>
@@ -141,6 +164,8 @@ def render_admin_page() -> str:
           const message = document.querySelector("#message");
           const form = document.querySelector("#login-form");
           const statusSection = document.querySelector("#status-section");
+          const opsSection = document.querySelector("#ops-section");
+          const opsPanel = document.querySelector("#ops-panel");
           const statusGrid = document.querySelector("#status-grid");
           const refreshButton = document.querySelector("#refresh");
           const clearActivityButton = document.querySelector("#clear-activity");
@@ -161,6 +186,123 @@ def render_admin_page() -> str:
 
           function card(label, value, small = false) {{
             return `<div class="card${{small ? " small" : ""}}"><div class="label">${{label}}</div><div class="value">${{value}}</div></div>`;
+          }}
+
+          function escapeHtml(value) {{
+            return String(value ?? "")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+          }}
+
+          async function adminFetch(path, options = {{}}) {{
+            const token = localStorage.getItem(tokenKey);
+            if (!token) {{
+              throw new Error("Нужно войти под администратором.");
+            }}
+            const response = await fetch(path, {{
+              ...options,
+              headers: {{
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${{token}}`,
+                ...(options.headers || {{}}),
+              }},
+            }});
+            if (!response.ok) {{
+              const text = await response.text();
+              throw new Error(text || `Ошибка ${{response.status}}`);
+            }}
+            return response.json();
+          }}
+
+          function renderJson(title, data) {{
+            opsPanel.innerHTML = `<h3>${{escapeHtml(title)}}</h3><pre>${{escapeHtml(JSON.stringify(data, null, 2))}}</pre>`;
+          }}
+
+          function renderUsers(data) {{
+            const rows = data.users.map((user) => `
+              <tr>
+                <td>${{escapeHtml(user.email)}}</td>
+                <td>${{user.is_admin ? "да" : "нет"}}</td>
+                <td>${{user.is_active ? "активен" : "отключен"}}</td>
+                <td>${{escapeHtml(formatDate(user.created_at))}}</td>
+                <td>${{escapeHtml(formatDate(user.last_login_at))}}</td>
+                <td>${{user.lists_count}}</td>
+                <td>
+                  <button class="compact secondary" data-user-action="${{user.is_active ? "disable" : "enable"}}" data-user-id="${{user.id}}">
+                    ${{user.is_active ? "Отключить" : "Включить"}}
+                  </button>
+                  <button class="compact secondary" data-user-action="set-password" data-user-id="${{user.id}}">Пароль</button>
+                </td>
+              </tr>`).join("");
+            opsPanel.innerHTML = `
+              <h3>Пользователи</h3>
+              <table>
+                <thead><tr><th>Email</th><th>Admin</th><th>Статус</th><th>Создан</th><th>Последний вход</th><th>Списков</th><th>Действия</th></tr></thead>
+                <tbody>${{rows || '<tr><td colspan="7">Пользователей нет.</td></tr>'}}</tbody>
+              </table>`;
+          }}
+
+          function renderLists(data) {{
+            const rows = data.lists.map((item) => `
+              <tr>
+                <td>${{escapeHtml(item.name)}}</td>
+                <td>${{escapeHtml(item.owner_email || item.owner_id)}}</td>
+                <td>${{item.items_count}}</td>
+                <td>${{item.members_count}}</td>
+                <td>${{item.is_archived ? "архив" : "активен"}}</td>
+                <td>${{escapeHtml(formatDate(item.updated_at))}}</td>
+                <td>
+                  <button class="compact secondary" data-list-action="details" data-list-id="${{item.id}}">Детали</button>
+                  <button class="compact secondary" data-list-action="${{item.is_archived ? "restore" : "archive"}}" data-list-id="${{item.id}}">
+                    ${{item.is_archived ? "Восстановить" : "Архивировать"}}
+                  </button>
+                </td>
+              </tr>`).join("");
+            opsPanel.innerHTML = `
+              <h3>Списки</h3>
+              <table>
+                <thead><tr><th>Название</th><th>Владелец</th><th>Товаров</th><th>Участников</th><th>Статус</th><th>Обновлен</th><th>Действия</th></tr></thead>
+                <tbody>${{rows || '<tr><td colspan="7">Списков нет.</td></tr>'}}</tbody>
+              </table>`;
+          }}
+
+          function renderInvites(data) {{
+            const rows = data.invites.map((invite) => `
+              <tr>
+                <td>${{escapeHtml(invite.list_name || invite.list_id)}}</td>
+                <td>${{escapeHtml(invite.created_by || "")}}</td>
+                <td>${{escapeHtml(invite.token_preview)}}</td>
+                <td>${{escapeHtml(formatDate(invite.expires_at))}}</td>
+                <td>${{escapeHtml(formatDate(invite.used_at))}}</td>
+                <td>${{escapeHtml(formatDate(invite.revoked_at))}}</td>
+                <td>
+                  ${{invite.used_at || invite.revoked_at ? "" : `<button class="compact danger" data-invite-action="revoke" data-invite-id="${{invite.id}}">Отозвать</button>`}}
+                </td>
+              </tr>`).join("");
+            opsPanel.innerHTML = `
+              <h3>Приглашения</h3>
+              <table>
+                <thead><tr><th>Список</th><th>Создал</th><th>Token</th><th>Истекает</th><th>Использовано</th><th>Отозвано</th><th>Действия</th></tr></thead>
+                <tbody>${{rows || '<tr><td colspan="7">Приглашений нет.</td></tr>'}}</tbody>
+              </table>`;
+          }}
+
+          async function loadAdminView(view) {{
+            try {{
+              opsPanel.innerHTML = "<p>Загрузка...</p>";
+              if (view === "users") renderUsers(await adminFetch("/admin/users"));
+              if (view === "lists") renderLists(await adminFetch("/admin/lists"));
+              if (view === "invites") renderInvites(await adminFetch("/admin/invites"));
+              if (view === "system") renderJson("Система", await adminFetch("/admin/system"));
+              if (view === "logs") renderJson("Логи", await adminFetch("/admin/logs"));
+              if (view === "diagnostics") renderJson("Диагностика", await adminFetch("/admin/diagnostics"));
+            }} catch (error) {{
+              showMessage(error.message, "error");
+              opsPanel.innerHTML = "<p>Не удалось загрузить раздел.</p>";
+            }}
           }}
 
           function renderStatus(data) {{
@@ -189,6 +331,7 @@ def render_admin_page() -> str:
             const token = localStorage.getItem(tokenKey);
             if (!token) {{
               statusSection.classList.add("hidden");
+              opsSection.classList.add("hidden");
               return;
             }}
             const response = await fetch("/admin/status", {{
@@ -197,6 +340,7 @@ def render_admin_page() -> str:
             if (response.status === 401 || response.status === 403) {{
               localStorage.removeItem(tokenKey);
               statusSection.classList.add("hidden");
+              opsSection.classList.add("hidden");
               showMessage("Нужно войти под администратором.", "error");
               return;
             }}
@@ -205,6 +349,7 @@ def render_admin_page() -> str:
               return;
             }}
             renderStatus(await response.json());
+            opsSection.classList.remove("hidden");
             showMessage("Статус обновлён.", "ok");
           }}
 
@@ -229,6 +374,53 @@ def render_admin_page() -> str:
           }});
 
           refreshButton.addEventListener("click", loadStatus);
+          document.querySelectorAll("[data-admin-view]").forEach((button) => {{
+            button.addEventListener("click", () => loadAdminView(button.dataset.adminView));
+          }});
+          opsPanel.addEventListener("click", async (event) => {{
+            const button = event.target.closest("button");
+            if (!button) return;
+            try {{
+              if (button.dataset.userAction === "disable") {{
+                if (!confirm("Отключить пользователя?")) return;
+                await adminFetch(`/admin/users/${{button.dataset.userId}}/disable`, {{ method: "POST" }});
+                await loadAdminView("users");
+              }}
+              if (button.dataset.userAction === "enable") {{
+                await adminFetch(`/admin/users/${{button.dataset.userId}}/enable`, {{ method: "POST" }});
+                await loadAdminView("users");
+              }}
+              if (button.dataset.userAction === "set-password") {{
+                const password = prompt("Новый пароль пользователя, минимум 8 символов");
+                if (!password) return;
+                await adminFetch(`/admin/users/${{button.dataset.userId}}/set-password`, {{
+                  method: "POST",
+                  body: JSON.stringify({{ password }}),
+                }});
+                showMessage("Пароль обновлен.", "ok");
+              }}
+              if (button.dataset.listAction === "details") {{
+                renderJson("Детали списка", await adminFetch(`/admin/lists/${{button.dataset.listId}}`));
+              }}
+              if (button.dataset.listAction === "archive") {{
+                if (!confirm("Архивировать список? Обычные пользователи перестанут видеть его в синхронизации.")) return;
+                await adminFetch(`/admin/lists/${{button.dataset.listId}}/archive`, {{ method: "POST" }});
+                await loadAdminView("lists");
+              }}
+              if (button.dataset.listAction === "restore") {{
+                await adminFetch(`/admin/lists/${{button.dataset.listId}}/restore`, {{ method: "POST" }});
+                await loadAdminView("lists");
+              }}
+              if (button.dataset.inviteAction === "revoke") {{
+                if (!confirm("Отозвать приглашение?")) return;
+                await adminFetch(`/admin/invites/${{button.dataset.inviteId}}/revoke`, {{ method: "POST" }});
+                await loadAdminView("invites");
+              }}
+              await loadStatus();
+            }} catch (error) {{
+              showMessage(error.message, "error");
+            }}
+          }});
           clearActivityButton.addEventListener("click", async () => {{
             const token = localStorage.getItem(tokenKey);
             if (!token) {{
@@ -253,6 +445,7 @@ def render_admin_page() -> str:
           clearTokenButton.addEventListener("click", () => {{
             localStorage.removeItem(tokenKey);
             statusSection.classList.add("hidden");
+            opsSection.classList.add("hidden");
             showMessage("Вы вышли из админ-панели.", "ok");
           }});
 
