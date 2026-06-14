@@ -421,7 +421,8 @@ private fun ShoppingScreen(
                     UpdateBanner(
                         updateInfo = updateInfo,
                         onDownload = {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateInfo.releaseUrl)))
+                            val downloadUrl = updateInfo.apkDownloadUrl ?: updateInfo.releaseUrl
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)))
                         },
                         onDismiss = {
                             scope.launch {
@@ -1424,7 +1425,7 @@ private fun AboutDialog(updateRepository: UpdateRepository, onDismiss: () -> Uni
                                 updateStatus = ""
                             } else {
                                 updateStatus = "Доступна новая версия ${result.latestVersion}."
-                                updateUrl = result.releaseUrl
+                                updateUrl = result.apkDownloadUrl
                             }
                         }
                     },

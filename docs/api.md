@@ -1,6 +1,6 @@
 # API сервера
 
-Актуально для версии `v1.4.4`.
+Актуально для версии `v1.4.5`.
 
 Базовый адрес: `https://your-domain.example`
 
@@ -47,7 +47,7 @@ Authorization: Bearer <token>
 
 ```text
 X-Client-App: shopping-list-android
-X-Client-Version: 1.4.4
+X-Client-Version: 1.4.5
 X-Client-Version-Code: 27
 X-Client-Platform: android
 X-Client-Os-Version: 14
@@ -123,7 +123,7 @@ X-Client-Operation-Id: <uuid>
 ```json
 {
   "status": "ok",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "timestamp": "2026-06-13T12:00:00"
 }
 ```
