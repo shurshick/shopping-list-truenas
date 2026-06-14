@@ -280,7 +280,7 @@ private fun ShoppingScreen(
     val purchasedItems = remember(visibleItems) { visibleItems.filter { it.is_checked } }
 
     LaunchedEffect(Unit) {
-        appUpdateInfo = updateRepository.checkForUpdate()
+        appUpdateInfo = updateRepository.checkForUpdate(force = true)
     }
 
     LaunchedEffect(appUpdateInfo?.latestVersion) {
