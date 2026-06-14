@@ -1,6 +1,14 @@
-# Список покупок v1.4.3
+# Список покупок v1.4.4
 
 Публичный релиз Android-приложения и серверной части для самостоятельного размещения.
+
+## Изменения именно в v1.4.4
+
+- Исправлено отображение платформы Android-клиента в `/admin/users`: вместо технического фрагмента шаблона показывается нормальное значение, например `android 14`.
+- Проверка обновлений Android при запуске больше не блокируется 12-часовым интервалом: при каждом запуске приложение проверяет последний GitHub Release.
+- При недоступности GitHub или сети уведомление по-прежнему не показывается.
+- Версия API поднята до `1.4.4`, чтобы в админке было видно обновление сервера.
+- Android version обновлен до `1.4.4`, `versionCode = 27`.
 
 ## Изменения именно в v1.4.3
 
@@ -42,7 +50,7 @@
 - Добавлена in-memory диагностика последних событий сервера.
 - Добавлена миграция БД `20260613_0004_ops_admin_fields`.
 - Backend tests расширены до 45 тестов.
-- Android версия обновлена до `1.4.3`, `versionCode = 26`.
+- Android версия обновлена до `1.4.4`, `versionCode = 27`.
 
 ## Полный состав
 
@@ -73,7 +81,7 @@
 
 ```text
 ghcr.io/shurshick/shopping-list-api:latest
-ghcr.io/shurshick/shopping-list-api:v1.4.3
+ghcr.io/shurshick/shopping-list-api:v1.4.4
 ```
 
 ## Проверки
@@ -88,14 +96,14 @@ git diff --check
 
 ## Файлы релиза
 
-- `shopping-list-android-v1.4.3.apk` - Android-приложение для установки на телефон.
-- `shopping-list-server-v1.4.3.zip` - серверная часть, Docker Compose-файлы и инструкции.
-- `shopping-list-source-v1.4.3.zip` - полный архив исходного кода.
+- `shopping-list-android-v1.4.4.apk` - Android-приложение для установки на телефон.
+- `shopping-list-server-v1.4.4.zip` - серверная часть, Docker Compose-файлы и инструкции.
+- `shopping-list-source-v1.4.4.zip` - полный архив исходного кода.
 
 ## Перед обновлением сервера
 
 1. Сделайте backup БД или выполните `python -m app.cli backup --output backup.json` внутри окружения backend.
-2. Обновите Docker image до `latest` или `v1.4.3`.
+2. Обновите Docker image до `latest` или `v1.4.4`.
 3. Перезапустите контейнер API.
 4. Проверьте `/health/ready` и `/admin/system`.
 

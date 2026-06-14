@@ -34,7 +34,7 @@ from ..services.migration_service import current_revision
 from ..setup import get_server_settings
 
 
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.4.4"
 
 router = APIRouter()
 
@@ -268,7 +268,7 @@ def render_admin_page() -> str:
                 <td>${{escapeHtml(formatDate(user.created_at))}}</td>
                 <td>${{escapeHtml(formatDate(user.last_login_at))}}</td>
                 <td>${{escapeHtml([user.last_client_app, user.last_client_version, user.last_client_version_code].filter(Boolean).join(" ")) || "—"}}</td>
-                <td>${{escapeHtml(user.last_client_platform || "")}}{{user.last_client_os_version ? " " + escapeHtml(user.last_client_os_version) : ""}}</td>
+                <td>${{escapeHtml([user.last_client_platform, user.last_client_os_version].filter(Boolean).join(" ")) || "—"}}</td>
                 <td>${{escapeHtml(formatDate(user.last_client_seen_at))}}</td>
                 <td>${{user.lists_count}}</td>
                 <td>
